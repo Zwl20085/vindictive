@@ -77,6 +77,7 @@ function buildState(): BoardState {
     has_token: !!store.token,
     settings: store.settings,
     now: toNaive(now),
+    pending_edits: 0,
   };
 }
 
@@ -142,6 +143,10 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
     return update({ tips: replaceTip(id, (t) => ({ ...t, snoozed_until: until, snoozed_until_at: until })) });
   },
   create_tip: ({ text }) => update({ tips: [createTip(text), ...store.tips] }),
+  push_now: () => buildState(),
+  fit_window: () => undefined,
+  set_color: ({ id, color }) => update({ tips: replaceTip(id, (t) => ({ ...t, color: color ?? undefined })) }),
+  set_size: ({ id, size }) => update({ tips: replaceTip(id, (t) => ({ ...t, size: size ?? undefined })) }),
   edit_local: ({ id }) => {
     const tip = store.tips.find((t) => t.id === id);
     if (!tip) throw new Error(`no tip with id ${id}`);

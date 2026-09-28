@@ -5,10 +5,11 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Manager};
 
 use super::state::AppState;
-use super::windows;
+use super::{editor, windows};
 
 const ID_SHOW: &str = "show";
 const ID_SYNC: &str = "sync";
+const ID_PUSH: &str = "push";
 const ID_CAPTURE: &str = "capture";
 const ID_SETTINGS: &str = "settings";
 const ID_QUIT: &str = "quit";
@@ -16,6 +17,7 @@ const ID_QUIT: &str = "quit";
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, ID_SHOW, "Show / hide board", true, None::<&str>)?;
     let sync = MenuItem::with_id(app, ID_SYNC, "Sync now", true, None::<&str>)?;
+    let push = MenuItem::with_id(app, ID_PUSH, "Commit & push local edits now", true, None::<&str>)?;
     let capture = MenuItem::with_id(app, ID_CAPTURE, "Quick capture", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit Vindictive", true, None::<&str>)?;
@@ -24,6 +26,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         &[
             &show,
             &sync,
+            &push,
             &capture,
             &settings,
             &PredefinedMenuItem::separator(app)?,
@@ -68,6 +71,15 @@ fn on_menu(app: &AppHandle, id: &str) {
                 if let Err(e) = state.sync(&app).await {
                     log::warn!("manual sync: {e}");
                 }
+            });
+            Ok(())
+        }
+        ID_PUSH => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app.state::<AppState>();
+                let n = editor::push_pending(&app, &state).await;
+                log::info!("manual push: {n} file(s)");
             });
             Ok(())
         }

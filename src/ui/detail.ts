@@ -1,7 +1,8 @@
 import type { Settings, Tip } from '../types';
 import { locale, t } from '../lib/i18n';
 import { countdown, formatLocal, minutesUntilTomorrowMorning, parseNaive } from '../lib/time';
-import { tileColor } from '../lib/tileColor';
+import { DEADLINE_COLORS, KIND_COLORS, OVERDUE_COLOR, tileColor } from '../lib/tileColor';
+import { TILE_SIZES, tileSize, type TileSize } from '../lib/tileSize';
 import { isRelativeSrc, renderMarkdown, resolveImages, type ImageResolver } from '../lib/markdown';
 import { editUrl } from '../lib/github';
 import { el } from './dom';
@@ -22,6 +23,8 @@ export interface DetailActions {
   onSnooze: (id: string, minutes: number) => void;
   onDelete: (id: string) => void;
   onEditLocal: (id: string) => void;
+  onSetColor: (id: string, color: string | null) => void;
+  onSetSize: (id: string, size: TileSize | null) => void;
   onOpenLink: (url: string) => void;
   onBack: () => void;
   resolveImage: ImageResolver;
@@ -32,6 +35,7 @@ export interface DetailOptions {
   settings: Settings;
   now: Date;
   actions: DetailActions;
+  isNextUp?: boolean;
 }
 
 function header(tip: Tip, now: Date): HTMLElement {
@@ -76,6 +80,61 @@ function paperBlock(tip: Tip, onOpenLink: (url: string) => void): HTMLElement | 
     paper ? el('p', { className: 'detail-paper-title', text: paper.title }) : null,
     el('p', { className: 'detail-paper-meta', text: meta }),
     link,
+  );
+}
+
+/** Swatches offered for the colour override: the tile palette plus a few extras. */
+export const SWATCHES: readonly string[] = [
+  KIND_COLORS.task,
+  KIND_COLORS.event,
+  KIND_COLORS.note,
+  KIND_COLORS.reading,
+  DEADLINE_COLORS.later,
+  DEADLINE_COLORS.soon,
+  DEADLINE_COLORS.critical,
+  OVERDUE_COLOR,
+  '#2F4A7A', // navy
+  '#6B3A5B', // plum
+  '#5A5A2E', // olive
+  '#3C3C40', // charcoal
+];
+
+const SIZE_LABEL: Record<TileSize, 'sizeSm' | 'sizeMd' | 'sizeWide'> = { sm: 'sizeSm', md: 'sizeMd', wide: 'sizeWide' };
+
+/** Size and colour controls for the tile itself. */
+function tileSection(tip: Tip, isNextUp: boolean, now: Date, actions: DetailActions): HTMLElement {
+  const chip = (label: string, on: boolean, onClick: () => void, extra = ''): HTMLButtonElement => {
+    const b = el('button', { className: `chip${on ? ' chip-on' : ''} ${extra}`.trim(), type: 'button', text: label, 'aria-pressed': on ? 'true' : 'false' });
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  const explicitSize = TILE_SIZES.find((s) => s === tip.size);
+  const effective = tileSize(tip, isNextUp, now);
+  const sizes = el(
+    'div',
+    { className: 'chip-row', role: 'group', 'aria-label': t('size') },
+    chip(`${t('auto')} (${t(SIZE_LABEL[effective])})`, !explicitSize, () => actions.onSetSize(tip.id, null)),
+    ...TILE_SIZES.map((s) => chip(t(SIZE_LABEL[s]), explicitSize === s, () => actions.onSetSize(tip.id, s))),
+  );
+  const current = (tip.color ?? '').toLowerCase();
+  const swatches = el(
+    'div',
+    { className: 'chip-row', role: 'group', 'aria-label': t('colour') },
+    chip(t('auto'), !current, () => actions.onSetColor(tip.id, null)),
+    ...SWATCHES.map((hex) => {
+      const b = chip('', current === hex.toLowerCase(), () => actions.onSetColor(tip.id, hex), 'swatch');
+      b.style.setProperty('--swatch', hex);
+      b.setAttribute('aria-label', hex);
+      b.title = hex;
+      return b;
+    }),
+  );
+  return el(
+    'section',
+    { className: 'detail-tile' },
+    el('h2', { className: 'detail-section-title', text: t('tile') }),
+    el('div', { className: 'detail-tile-row' }, el('span', { className: 'detail-meta-key', text: t('size') }), sizes),
+    el('div', { className: 'detail-tile-row' }, el('span', { className: 'detail-meta-key', text: t('colour') }), swatches),
   );
 }
 
@@ -184,12 +243,19 @@ function actionBar(tip: Tip, settings: Settings, now: Date, actions: DetailActio
 
 /** Render the flipped-open detail panel for one tip. */
 export function renderDetail(options: DetailOptions): HTMLElement {
-  const { tip, settings, now, actions } = options;
+  const { tip, settings, now, actions, isNextUp = false } = options;
   const colour = tileColor(tip, now);
   const panel = el('section', { className: 'detail', role: 'dialog', 'aria-modal': 'true', 'aria-label': tip.title });
   panel.append(
     header(tip, now),
-    ...[metaRows(tip), paperBlock(tip, actions.onOpenLink), figures(tip, actions.resolveImage), body(tip, actions.resolveImage), linksList(tip, actions.onOpenLink)].filter(
+    ...[
+      metaRows(tip),
+      paperBlock(tip, actions.onOpenLink),
+      figures(tip, actions.resolveImage),
+      body(tip, actions.resolveImage),
+      linksList(tip, actions.onOpenLink),
+      tileSection(tip, isNextUp, now, actions),
+    ].filter(
       (n): n is HTMLElement => !!n,
     ),
     actionBar(tip, settings, now, actions, panel),

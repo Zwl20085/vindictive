@@ -6,10 +6,11 @@ use base64::Engine;
 use chrono::Duration;
 use tauri::{AppHandle, State};
 
-use super::settings::{Dock, Settings};
+use super::settings::{Dock, Language, Settings};
 use super::state::{now, AppState, BoardState};
 use super::{editor, secrets, windows};
 use crate::core::capture;
+use crate::core::template;
 use crate::core::tip::{slugify, Kind, Tip};
 use crate::sync::github::{validate_dir, GithubClient};
 use crate::sync::meta;
@@ -20,6 +21,7 @@ const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MIN_SNOOZE_MINUTES: i64 = 1;
 const MAX_SNOOZE_MINUTES: i64 = 60 * 24 * 30;
 const MAX_LOG_CHARS: usize = 2000;
+const TILE_SIZES: [&str; 3] = ["sm", "md", "wide"];
 
 #[tauri::command]
 pub fn get_state(state: State<'_, AppState>) -> BoardState {
@@ -74,6 +76,75 @@ pub async fn snooze(
     let msg = format!("vindictive: snooze \"{}\"", tip.front.title);
     state.save_tip(&app, tip.snooze_until(until), &msg).await?;
     Ok(state.snapshot())
+}
+
+/// Set or clear (`None`) the tile colour override.
+#[tauri::command]
+pub async fn set_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    color: Option<String>,
+) -> Result<BoardState, String> {
+    let color = color.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    if let Some(c) = &color {
+        if !is_hex_color(c) {
+            return Err(format!("{c:?} is not a hex colour like #4A3B6B"));
+        }
+    }
+    let tip = find(&state, &id)?;
+    let mut front = tip.front.clone();
+    front.color = color;
+    let msg = format!("vindictive: colour \"{}\"", tip.front.title);
+    state.save_tip(&app, tip.with_front(front), &msg).await?;
+    Ok(state.snapshot())
+}
+
+/// Set or clear (`None`) the tile size override (`sm`, `md`, `wide`).
+#[tauri::command]
+pub async fn set_size(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    size: Option<String>,
+) -> Result<BoardState, String> {
+    let size = size.map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty());
+    if let Some(s) = &size {
+        if !TILE_SIZES.contains(&s.as_str()) {
+            return Err(format!("size must be one of {}", TILE_SIZES.join(", ")));
+        }
+    }
+    let tip = find(&state, &id)?;
+    let mut front = tip.front.clone();
+    front.size = size;
+    let msg = format!("vindictive: size \"{}\"", tip.front.title);
+    state.save_tip(&app, tip.with_front(front), &msg).await?;
+    Ok(state.snapshot())
+}
+
+/// Commit every pending local edit now.
+#[tauri::command]
+pub async fn push_now(app: AppHandle, state: State<'_, AppState>) -> Result<BoardState, String> {
+    editor::push_pending(&app, &state).await;
+    Ok(state.snapshot())
+}
+
+/// Resize the board window to `height` logical pixels, clamped to the
+/// monitor's work area, keeping it docked.
+#[tauri::command]
+pub fn fit_window(app: AppHandle, state: State<'_, AppState>, height: f64) -> Result<(), String> {
+    if !height.is_finite() || height <= 0.0 {
+        return Err("bad height".into());
+    }
+    windows::fit_main(&app, state.settings().dock, height)
+}
+
+fn is_hex_color(value: &str) -> bool {
+    let hex = match value.strip_prefix('#') {
+        Some(h) => h,
+        None => return false,
+    };
+    (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Open the tip in the local editor and keep it in sync; returns the file path.
@@ -135,9 +206,10 @@ pub async fn create_tip(
     let file_name = state.board().unique_file_name(&stem);
     let path = settings.tip_path(&file_name);
     let title = front.title.clone();
-    let tip = Tip::from_parts(&path, None, front, String::new());
+    let zh = settings.language == Language::Zh;
+    let (tip, text) = template::render(&path, front, zh).map_err(|e| e.to_string())?;
     let msg = format!("vindictive: capture \"{title}\"");
-    let saved = state.save_tip(&app, tip, &msg).await?;
+    let saved = state.save_tip_text(&app, tip, &text, &msg).await?;
     if saved.front.arxiv.is_some() || saved.front.doi.is_some() {
         let app2 = app.clone();
         let id = saved.id.clone();
@@ -388,6 +460,15 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(resolve_repo_path(&root, "a.png").unwrap(), "a.png");
+    }
+
+    #[test]
+    fn hex_colours() {
+        assert!(is_hex_color("#4A3B6B"));
+        assert!(is_hex_color("#abc"));
+        assert!(!is_hex_color("4A3B6B"));
+        assert!(!is_hex_color("#12345"));
+        assert!(!is_hex_color("#GGGGGG"));
     }
 
     #[test]

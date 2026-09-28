@@ -22,6 +22,7 @@ images:
   - figures/ac-loss-sweep.svg    # png, jpg, gif, webp, svg, or an https URL
 repeat: weekly on mon at 10:00   # daily | weekdays | weekly on mon,thu | monthly on 1 | yearly on 03-15
 color: "#FF0097"                 # optional tile colour override
+size: md                         # optional tile size override: sm | md | wide
 arxiv: 2401.12345                # or
 doi: 10.1109/TIE.2024.1234567
 ---
@@ -48,6 +49,14 @@ Body in **Markdown**. Checklists, images, links all work.
 - Inline `<svg>` in the body is rendered as-is after sanitising: scripts,
   event handlers, `<style>` and `<foreignObject>` are removed.
 
+## New tips
+
+A tip created from the capture bar or the "+" tile starts as a template:
+the keys you typed, a commented reference of every optional key, and an
+example body (checklist, figure, links). Edit or delete what you do not
+need. The comments last until the app rewrites the file (Done, snooze, a
+pushed local edit); by then they have done their job.
+
 ## Keys the app writes
 
 | Key             | Written when                                              |
@@ -57,6 +66,7 @@ Body in **Markdown**. Checklists, images, links all work.
 | `snoozed_until` | you press **Snooze**                                      |
 | `paper`         | arXiv / Crossref metadata was fetched                     |
 | `created`       | the tip was made with quick capture                       |
+| `color`, `size` | you pick a swatch or size in the tile's detail view       |
 
 ## Quick-capture syntax
 

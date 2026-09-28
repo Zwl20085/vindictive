@@ -1,4 +1,5 @@
 import { call, onBoardUpdated, openExternal } from '../api';
+import type { TileSize } from '../lib/tileSize';
 import type { BoardState, Dock, Settings } from '../types';
 import { setLocale, t } from '../lib/i18n';
 import { minutesUntilTomorrowMorning } from '../lib/time';
@@ -54,6 +55,7 @@ export class App {
     setInterval(() => this.renderFaces(this.store.get()), TICK_MS);
     setInterval(() => void this.loadWeather(true), WEATHER_MS);
     window.addEventListener('resize', () => this.scheduleFit());
+    window.addEventListener('resize', () => this.userResized());
   }
 
   /** `#tip=<id>` opens that tip's detail on load (dev and deep links). */
@@ -189,9 +191,29 @@ export class App {
     fitTitles(this.front);
     this.renderBack(state, now);
     this.stage.classList.toggle('open', state.view.kind !== 'board');
+    this.fitWindow();
   }
 
   private fitTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastRequestedHeight = 0;
+
+  /** Ask the backend to size the window to the board (setting `fit_height`). */
+  private fitWindow(): void {
+    const state = this.store.get();
+    if (!state.board?.settings.fit_height || state.view.kind !== 'board') return;
+    const grid = this.front.querySelector<HTMLElement>('.board');
+    if (!grid) return;
+    const h = (el: Element | null | undefined): number => (el instanceof HTMLElement && !el.hidden ? el.offsetHeight : 0);
+    const height = Math.ceil(h(this.root.querySelector('.chrome')) + h(errorLine()) + h(this.panel.element) + h(this.front.querySelector('.addbar')) + grid.offsetHeight);
+    if (Math.abs(height - window.innerHeight) < 2 || height === this.lastRequestedHeight) return;
+    this.lastRequestedHeight = height;
+    void call('fit_window', { height }).catch((error) => console.warn('Vindictive: fit_window', error));
+  }
+
+  /** A resize that did not come from `fitWindow` lets the next render re-fit. */
+  private userResized(): void {
+    if (Math.abs(window.innerHeight - this.lastRequestedHeight) > 2) this.lastRequestedHeight = 0;
+  }
 
   /** Re-fit titles after the window stops resizing (the tile unit follows the width). */
   private scheduleFit(): void {
@@ -209,7 +231,7 @@ export class App {
     if (state.view.kind === 'detail') {
       const id = state.view.id;
       const tip = board.tips.find((t) => t.id === id);
-      if (tip) mount(this.back, renderDetail({ tip, settings: board.settings, now, actions: this.detailActions() }));
+      if (tip) mount(this.back, renderDetail({ tip, settings: board.settings, now, actions: this.detailActions(), isNextUp: tip.id === board.next_up }));
       return;
     }
   }
@@ -233,6 +255,7 @@ export class App {
   private chromeActions() {
     return {
       onSync: () => void this.refresh('sync_now'),
+      onPushNow: () => void this.mutate(() => call('push_now'), 'push_now'),
       onSettings: () => this.store.set({ view: { kind: 'settings' } }),
       onToggleDone: () => {
         const s = this.store.get().board?.settings;
@@ -258,6 +281,8 @@ export class App {
       onReopen: (id: string) => void this.mutate(() => call('reopen', { id }), 'reopen'),
       onSnooze: (id: string, minutes: number) => void this.mutate(() => call('snooze', { id, minutes }), 'snooze').then(() => this.back_()),
       onDelete: (id: string) => void this.mutate(() => call('delete_tip', { id }), 'delete_tip').then(() => this.back_()),
+      onSetColor: (id: string, color: string | null) => void this.mutate(() => call('set_color', { id, color }), 'set_color'),
+      onSetSize: (id: string, size: TileSize | null) => void this.mutate(() => call('set_size', { id, size }), 'set_size'),
       onEditLocal: (id: string) =>
         void guard('edit_local', () => call('edit_local', { id })).then((path) => {
           if (path) showError(t('openedIn'), path);

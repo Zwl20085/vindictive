@@ -78,6 +78,9 @@ pub struct FrontMatter {
     pub repeat: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Tile size override: `sm`, `md` or `wide`. Absent means automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arxiv: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

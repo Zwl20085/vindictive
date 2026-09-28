@@ -19,6 +19,11 @@ function tip(over: Partial<Tip>): Tip {
 }
 
 describe('tileSize', () => {
+  it('an explicit size wins', () => {
+    expect(tileSize(tip({ size: 'sm', priority: 'high' }), true, now)).toBe('sm');
+    expect(tileSize(tip({ size: 'wide' }), false, now)).toBe('wide');
+    expect(tileSize(tip({ size: 'huge' }), false, now)).toBe('sm');
+  });
   it('next-up is always wide', () => {
     expect(tileSize(tip({ priority: 'low' }), true, now)).toBe('wide');
   });

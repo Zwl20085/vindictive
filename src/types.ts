@@ -45,6 +45,8 @@ export interface Tip {
   repeat?: string;
   /** Optional CSS colour override for the tile. */
   color?: string;
+  /** Optional tile size override: `sm`, `md` or `wide`. */
+  size?: string;
   arxiv?: string;
   doi?: string;
   paper?: Paper;
@@ -86,6 +88,10 @@ export interface Settings {
   show_panel: boolean;
   /** Command for "Edit locally" (e.g. `code`); blank = system default app. */
   editor_command: string;
+  /** Minutes between scheduled pushes of local edits; 0 = at once. */
+  push_interval_minutes: number;
+  /** Window height follows the tiles, up to the work area. */
+  fit_height: boolean;
 }
 
 /** Current conditions, fetched by the backend from Open-Meteo. */
@@ -116,6 +122,10 @@ export interface BoardState {
   settings: Settings;
   /** Backend local time at the moment the state was produced. */
   now: string;
+  /** Local edits saved but not yet committed. */
+  pending_edits: number;
+  /** When the next scheduled push runs, if anything is pending. */
+  next_push?: string;
 }
 
 /**
@@ -133,6 +143,14 @@ export interface Commands {
   delete_tip: (args: { id: string }) => BoardState;
   /** Write the tip to the local edit folder, open it in the editor, and push every save. Returns the path. */
   edit_local: (args: { id: string }) => string;
+  /** Commit every pending local edit now. */
+  push_now: () => BoardState;
+  /** Set (`#rrggbb`) or clear (`null`) the tile colour override. */
+  set_color: (args: { id: string; color: string | null }) => BoardState;
+  /** Set (`sm` | `md` | `wide`) or clear (`null`) the tile size override. */
+  set_size: (args: { id: string; size: string | null }) => BoardState;
+  /** Resize the window to `height` logical px (clamped to the work area). */
+  fit_window: (args: { height: number }) => void;
   /** Quick-capture line, see `core/capture.rs` for the syntax. */
   create_tip: (args: { text: string }) => BoardState;
   save_settings: (args: { settings: Settings }) => BoardState;

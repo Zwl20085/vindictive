@@ -27,6 +27,17 @@
   font-weight: var(--weight-body);
 }
 
+/* Count of local edits waiting for the next push. */
+.chrome-pending {
+  margin-left: auto;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  background: var(--warn);
+  color: #1a1a1a;
+}
+
 .sync-dot {
   width: 6px;
   height: 6px;

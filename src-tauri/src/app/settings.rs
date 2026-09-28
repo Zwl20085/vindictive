@@ -9,6 +9,8 @@ pub const MIN_POLL_SECONDS: u64 = 15;
 pub const MAX_POLL_SECONDS: u64 = 3600;
 pub const MIN_COLUMNS: u32 = 2;
 pub const MAX_COLUMNS: u32 = 6;
+/// Longest allowed gap between scheduled pushes of local edits.
+pub const MAX_PUSH_INTERVAL_MINUTES: u64 = 24 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -63,6 +65,10 @@ pub struct Settings {
     /// Command that opens a file for "Edit locally"; blank means the system
     /// default application for `.md`.
     pub editor_command: String,
+    /// Minutes between scheduled pushes of local edits; 0 pushes at once.
+    pub push_interval_minutes: u64,
+    /// Resize the window height to fit the tiles (up to the work area).
+    pub fit_height: bool,
 }
 
 impl Default for Settings {
@@ -85,6 +91,8 @@ impl Default for Settings {
             weather_location: String::new(),
             show_panel: true,
             editor_command: "code".into(),
+            push_interval_minutes: 60,
+            fit_height: true,
         }
     }
 }
@@ -140,6 +148,11 @@ impl Settings {
             .take(MAX_LOCATION_CHARS)
             .collect();
         s.editor_command = s.editor_command.trim().to_string();
+        if s.push_interval_minutes > MAX_PUSH_INTERVAL_MINUTES {
+            return Err(format!(
+                "push interval must be at most {MAX_PUSH_INTERVAL_MINUTES} minutes"
+            ));
+        }
         Ok(s)
     }
 
@@ -238,6 +251,8 @@ mod tests {
         assert_eq!(s.language, Language::En);
         assert!(s.show_panel);
         assert_eq!(s.editor_command, "code");
+        assert_eq!(s.push_interval_minutes, 60);
+        assert!(s.fit_height);
         assert!(s.weather_location.is_empty());
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);

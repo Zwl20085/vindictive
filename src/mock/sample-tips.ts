@@ -33,6 +33,8 @@ export const SAMPLE_SETTINGS: Settings = {
   weather_location: query.get('weather') ?? 'Tokyo',
   show_panel: query.get('panel') !== '0',
   editor_command: 'code',
+  push_interval_minutes: 60,
+  fit_height: true,
 };
 
 /** Realistic researcher sample data for browser development. */

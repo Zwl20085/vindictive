@@ -6,5 +6,6 @@ pub mod deadline;
 pub mod frontmatter;
 pub mod nextup;
 pub mod recur;
+pub mod template;
 pub mod timeparse;
 pub mod tip;

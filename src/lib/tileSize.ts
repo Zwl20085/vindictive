@@ -11,11 +11,18 @@ export const TILE_SPANS: Record<TileSize, readonly [number, number]> = {
   wide: [4, 2],
 };
 
+export const TILE_SIZES: readonly TileSize[] = ['sm', 'md', 'wide'];
+
+export function isTileSize(value: unknown): value is TileSize {
+  return typeof value === 'string' && (TILE_SIZES as readonly string[]).includes(value);
+}
+
 /**
- * `wide` for the next-up tip, `md` for high priority or a deadline within
- * seven days, `sm` otherwise.
+ * An explicit `size` wins. Otherwise `wide` for the next-up tip, `md` for
+ * high priority or a deadline within seven days, `sm` for the rest.
  */
 export function tileSize(tip: Tip, isNextUp: boolean, now: Date): TileSize {
+  if (isTileSize(tip.size)) return tip.size;
   if (isNextUp) return 'wide';
   if (tip.priority === 'high') return 'md';
   const urgency = urgencyOf(parseNaive(tip.due_at), now);

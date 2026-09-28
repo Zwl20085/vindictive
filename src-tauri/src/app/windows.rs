@@ -1,6 +1,6 @@
 //! Window placement, the capture bar, the global hotkey and autostart.
 
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
@@ -13,6 +13,8 @@ pub const EVENT_OPEN_SETTINGS: &str = "open-settings";
 
 /// Gap between the board and the screen edge, in physical pixels.
 const EDGE_MARGIN: i32 = 12;
+/// Smallest height the board will shrink to when fitting its tiles.
+const MIN_FIT_HEIGHT: f64 = 200.0;
 
 fn window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
     app.get_webview_window(label)
@@ -75,6 +77,35 @@ pub fn dock_main(app: &AppHandle, dock: Dock) -> Result<(), String> {
     );
     w.set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())
+}
+
+/// Resize the board to `height` logical pixels (clamped to the work area
+/// minus the edge margin), then re-dock so it stays on its edge.
+pub fn fit_main(app: &AppHandle, dock: Dock, height: f64) -> Result<(), String> {
+    let w = window(app, MAIN)?;
+    let monitor = w
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .or_else(|| w.primary_monitor().ok().flatten())
+        .ok_or("no monitor found")?;
+    let scale = w.scale_factor().map_err(|e| e.to_string())?;
+    let area_h = monitor.work_area().size.height as f64 / scale - 2.0 * EDGE_MARGIN as f64 / scale;
+    let target = fit_height(height, area_h);
+    let current = w
+        .inner_size()
+        .map_err(|e| e.to_string())?
+        .to_logical::<f64>(scale);
+    if (current.height - target).abs() < 1.0 {
+        return Ok(());
+    }
+    w.set_size(LogicalSize::new(current.width, target))
+        .map_err(|e| e.to_string())?;
+    dock_main(app, dock)
+}
+
+/// Clamp a wanted height into `[MIN_FIT_HEIGHT, work area]`.
+pub fn fit_height(wanted: f64, area: f64) -> f64 {
+    wanted.max(MIN_FIT_HEIGHT).min(area.max(MIN_FIT_HEIGHT)).round()
 }
 
 /// Pure placement maths, testable without a display.
@@ -155,6 +186,14 @@ pub fn apply_initial(app: &AppHandle, settings: &Settings) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_height_clamps() {
+        assert_eq!(fit_height(500.0, 1000.0), 500.0);
+        assert_eq!(fit_height(50.0, 1000.0), MIN_FIT_HEIGHT);
+        assert_eq!(fit_height(5000.0, 1000.0), 1000.0);
+        assert_eq!(fit_height(5000.0, 100.0), MIN_FIT_HEIGHT);
+    }
 
     #[test]
     fn dock_positions() {

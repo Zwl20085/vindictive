@@ -15,6 +15,18 @@
   background: var(--bg);
 }
 
+.face::-webkit-scrollbar {
+  width: 4px;
+}
+
+.face::-webkit-scrollbar-thumb {
+  background: var(--fg-muted);
+}
+
+.face::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .face-front {
   transform: rotateY(0deg);
 }

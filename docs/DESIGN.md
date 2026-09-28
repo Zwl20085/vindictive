@@ -138,14 +138,24 @@ The whole board flips to a single detail panel in the tile's colour:
 - Themes: `dark`, `light`, `nerv` (near-black, orange edge), `cobalt` (deep
   blue), `paper` (warm off-white). Themes change only the ground, text and
   edge tokens; tile colours are shared.
+- **Tile section** in the detail view: size chips (Auto / Small / Medium /
+  Wide → `size` key) and colour swatches (the palette plus navy, plum,
+  olive, charcoal → `color` key). Each pick is one commit.
+- **Fit height** (`fit_height`, on by default): after every board render the
+  window height is set to strip + panel + grid, clamped to the monitor's
+  work area, and the board re-docks. Beyond that the board scrolls with a
+  4 px scrollbar.
 - **Edit locally** (detail view and tile menu) writes the tip's Markdown to
   `%APPDATA%\dev.zhangwentao.vindictive\edit\<repo path>`, opens it with
   the `editor_command` setting (`code` by default; blank means the system
-  default app) and watches it every 2 s. Each save that parses as a tip is
-  pushed to GitHub as one commit, then the file is rewritten in canonical
-  form. If the tip changes elsewhere while the file is untouched, the file is
-  refreshed. A file that does not parse (mid-edit frontmatter) is simply
-  retried after the next save.
+  default app) and watches it every 2 s. Saves are collected as *pending*
+  (count shown on the strip) and committed, one commit per file, every
+  `push_interval_minutes` (default 60; 0 = at once) or when you pick
+  **Commit & push local edits now** in the strip menu or the tray. After a
+  push the file is rewritten in canonical form. If the tip changes elsewhere
+  while the file is untouched, the file is refreshed. Sessions persist in
+  `edits.json`, so pending edits survive a restart. A file that does not
+  parse (mid-edit frontmatter) stays pending until the next save fixes it.
 - Settings is an overlay in the same window, in three groups: GitHub (owner,
   repo, branch, dir, token in Windows Credential Manager, poll interval);
   appearance (language, theme, columns, weather city, panel, show done);

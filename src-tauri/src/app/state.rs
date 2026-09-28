@@ -38,6 +38,8 @@ pub struct Inner {
     pub weather: Option<(String, Weather)>,
     /// Files open in the local editor, by tip id.
     pub edits: HashMap<String, EditSession>,
+    /// When local edits were last pushed (scheduled or manual).
+    pub last_push: Option<NaiveDateTime>,
 }
 
 pub struct AppState {
@@ -59,6 +61,11 @@ pub struct BoardState {
     pub has_token: bool,
     pub settings: Settings,
     pub now: NaiveDateTime,
+    /// Local edits saved but not yet committed.
+    pub pending_edits: usize,
+    /// When the next scheduled push will run, if edits are pending.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_push: Option<NaiveDateTime>,
 }
 
 /// Local wall-clock time, truncated to whole seconds so it serialises as
@@ -74,6 +81,11 @@ impl AppState {
             settings: storage.load_settings(),
             board: Board::new(storage.load_cache()),
             fired: storage.load_fired(),
+            edits: storage
+                .load_edits()
+                .into_iter()
+                .map(|s| (s.id.clone(), s))
+                .collect(),
             ..Default::default()
         };
         Self {
@@ -113,6 +125,12 @@ impl AppState {
                 .filter(|t| !open.iter().any(|o| o.id == t.id))
                 .cloned()
                 .collect();
+            let pending_edits = i.edits.values().filter(|s| s.pending.is_some()).count();
+            let next_push = if pending_edits > 0 {
+                super::editor::next_push_at(i.settings.push_interval_minutes, i.last_push)
+            } else {
+                None
+            };
             BoardState {
                 next_up: next_up(&i.board.tips, now),
                 tips: open.into_iter().chain(hidden).collect(),
@@ -121,6 +139,8 @@ impl AppState {
                 has_token,
                 settings: i.settings.clone(),
                 now,
+                pending_edits,
+                next_push,
             }
         })
     }
@@ -193,6 +213,17 @@ impl AppState {
         self.with(|i| i.weather = Some((place.to_string(), weather)));
     }
 
+    /// Mutate the editor sessions and persist them.
+    pub fn update_edits(&self, f: impl FnOnce(&mut HashMap<String, EditSession>)) {
+        let snapshot: Vec<EditSession> = self.with(|i| {
+            f(&mut i.edits);
+            i.edits.values().cloned().collect()
+        });
+        if let Err(e) = self.storage.save_edits(&snapshot) {
+            log::warn!("edit sessions not saved: {e}");
+        }
+    }
+
     /// Pull the remote listing and any changed files. Returns ids of tips
     /// that were not on the board before (empty on the very first load).
     pub async fn sync<R: Runtime>(&self, app: &AppHandle<R>) -> Result<Vec<String>, String> {
@@ -244,13 +275,25 @@ impl AppState {
         tip: Tip,
         message: &str,
     ) -> Result<Tip, String> {
-        let client = self.client()?;
         let text = tip.to_markdown().map_err(|e| e.to_string())?;
+        self.save_tip_text(app, tip, &text, message).await
+    }
+
+    /// Like `save_tip`, but writes `text` verbatim (used for the new-tip
+    /// template, whose comments the serialiser would drop).
+    pub async fn save_tip_text<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        tip: Tip,
+        text: &str,
+        message: &str,
+    ) -> Result<Tip, String> {
+        let client = self.client()?;
         // Optimistic local update so the UI reacts immediately.
         self.replace_board(self.board().upsert(tip.clone()));
         self.emit(app);
         match client
-            .put_text(&tip.path, &text, tip.sha.as_deref(), message)
+            .put_text(&tip.path, text, tip.sha.as_deref(), message)
             .await
         {
             Ok(sha) => {
