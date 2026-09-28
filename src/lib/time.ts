@@ -2,6 +2,8 @@
  * Local wall-clock time helpers. The backend sends naive timestamps
  * (`YYYY-MM-DDTHH:MM:SS`, no zone); we interpret them as local time.
  */
+import type { Language } from '../types';
+import { formatDateTime, spanUnits, t } from './i18n';
 
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 60 * MINUTE_MS;
@@ -24,25 +26,26 @@ export function parseNaive(value: string | undefined | null): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-/** Format a duration magnitude: `3w`, `5d`, `2d 4h`, `6h`, `45m`. */
-export function formatSpan(ms: number): string {
+/** Format a duration magnitude: `3w`, `5d`, `2d 4h`, `6h`, `45m` (or `3周`, `2天4时`…). */
+export function formatSpan(ms: number, lang: Language = 'en'): string {
+  const u = spanUnits(lang);
   const abs = Math.abs(ms);
-  if (abs >= WEEK_MS) return `${Math.floor(abs / WEEK_MS)}w`;
-  if (abs >= DAYS_ONLY_FROM_MS) return `${Math.floor(abs / DAY_MS)}d`;
+  if (abs >= WEEK_MS) return `${Math.floor(abs / WEEK_MS)}${u.w}`;
+  if (abs >= DAYS_ONLY_FROM_MS) return `${Math.floor(abs / DAY_MS)}${u.d}`;
   if (abs >= DAY_MS) {
     const days = Math.floor(abs / DAY_MS);
     const hours = Math.floor((abs - days * DAY_MS) / HOUR_MS);
-    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+    return hours > 0 ? `${days}${u.d}${u.sep}${hours}${u.h}` : `${days}${u.d}`;
   }
-  if (abs >= HOUR_MS) return `${Math.floor(abs / HOUR_MS)}h`;
-  return `${Math.max(1, Math.floor(abs / MINUTE_MS))}m`;
+  if (abs >= HOUR_MS) return `${Math.floor(abs / HOUR_MS)}${u.h}`;
+  return `${Math.max(1, Math.floor(abs / MINUTE_MS))}${u.m}`;
 }
 
 /** Countdown text for a tile: `2d 4h` or `overdue 2h`. */
-export function countdown(due: Date, now: Date): string {
+export function countdown(due: Date, now: Date, lang: Language = 'en'): string {
   const diff = due.getTime() - now.getTime();
-  if (diff <= 0) return `overdue ${formatSpan(diff)}`;
-  return formatSpan(diff);
+  if (diff <= 0) return `${t('overdue', lang)} ${formatSpan(diff, lang)}`;
+  return formatSpan(diff, lang);
 }
 
 /** Minutes from `now` until 09:00 tomorrow, for the "Tomorrow" snooze. */
@@ -51,18 +54,16 @@ export function minutesUntilTomorrowMorning(now: Date): number {
   return Math.max(1, Math.round((target.getTime() - now.getTime()) / MINUTE_MS));
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /** Human date, e.g. `Oct 15, 23:59`. */
-export function formatLocal(date: Date): string {
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${MONTHS[date.getMonth()]} ${date.getDate()}, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+export function formatLocal(date: Date, lang: Language = 'en'): string {
+  return formatDateTime(date, lang);
 }
 
 /** Time of day only, e.g. `12:03`. */
-export function formatClock(date: Date): string {
+export function formatClock(date: Date, seconds = false): string {
   const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const hm = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return seconds ? `${hm}:${pad(date.getSeconds())}` : hm;
 }
 
 /** Serialise a Date back to the naive backend format. */

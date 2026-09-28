@@ -8,24 +8,28 @@ export interface TileColor {
   overdue: boolean;
 }
 
-/** Metro palette from docs/DESIGN.md. */
+/**
+ * NERV palette, see docs/DESIGN.md. Every colour is desaturated enough to sit
+ * on the same monitor for a whole day; the only saturated thing on the board
+ * is the orange accent edge on the next-up tile.
+ */
 export const KIND_COLORS: Record<Exclude<Kind, 'deadline'>, string> = {
-  task: '#2D89EF',
-  event: '#00ABA9',
-  note: '#7E3878',
-  reading: '#DA532C',
+  task: '#4A3B6B', // EVA-01 purple
+  event: '#2C5F58', // deep teal
+  note: '#3A4356', // slate
+  reading: '#8C4A22', // burnt orange
 };
 
 export const DEADLINE_COLORS: Record<Exclude<Urgency, 'overdue'>, string> = {
-  none: '#1E7145',
-  later: '#1E7145',
-  soon: '#FFC40D',
-  critical: '#EE1111',
+  none: '#3F6B3A', // EVA-01 green
+  later: '#3F6B3A',
+  soon: '#A87B1F', // amber
+  critical: '#9E2F2A', // EVA-02 red
 };
 
-export const OVERDUE_COLOR = '#B91D47';
-export const DONE_COLOR = '#3A3A3D';
-export const LIGHT_FG = '#FFFFFF';
+export const OVERDUE_COLOR = '#6E1B2B';
+export const DONE_COLOR = '#26272B';
+export const LIGHT_FG = '#F2EFE9';
 export const DARK_FG = '#1A1A1A';
 
 /** Relative luminance threshold above which we use dark text. */

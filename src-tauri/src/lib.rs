@@ -78,6 +78,7 @@ pub fn run() {
             commands::test_connection,
             commands::fetch_image,
             commands::enrich_tip,
+            commands::fetch_weather,
             commands::show_capture,
             commands::hide_capture,
             commands::dock_window,

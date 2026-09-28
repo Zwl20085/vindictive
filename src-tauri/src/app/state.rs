@@ -18,9 +18,12 @@ use super::storage::Storage;
 use crate::core::nextup::{next_up, ordered};
 use crate::core::tip::Tip;
 use crate::sync::github::{GithubClient, GithubError};
+use crate::sync::weather::Weather;
 
 pub const EVENT_BOARD_UPDATED: &str = "board-updated";
 const IMAGE_CACHE_MAX: usize = 64;
+/// Weather older than this is refetched.
+pub const WEATHER_FRESH_MINUTES: i64 = 20;
 
 #[derive(Debug, Default)]
 pub struct Inner {
@@ -30,6 +33,8 @@ pub struct Inner {
     pub sync_error: Option<String>,
     pub fired: BTreeSet<String>,
     pub image_cache: HashMap<String, String>,
+    /// Last weather result and the place it was fetched for.
+    pub weather: Option<(String, Weather)>,
 }
 
 pub struct AppState {
@@ -169,6 +174,20 @@ impl AppState {
 
     pub fn cached_image(&self, key: &str) -> Option<String> {
         self.with(|i| i.image_cache.get(key).cloned())
+    }
+
+    /// Weather for `place` if it was fetched less than `WEATHER_FRESH_MINUTES` ago.
+    pub fn fresh_weather(&self, place: &str, now: NaiveDateTime) -> Option<Weather> {
+        self.with(|i| {
+            let (for_place, w) = i.weather.as_ref()?;
+            let age = now - w.fetched_at;
+            (for_place == place && age < chrono::Duration::minutes(WEATHER_FRESH_MINUTES))
+                .then(|| w.clone())
+        })
+    }
+
+    pub fn cache_weather(&self, place: &str, weather: Weather) {
+        self.with(|i| i.weather = Some((place.to_string(), weather)));
     }
 
     /// Pull the remote listing and any changed files. Returns ids of tips

@@ -7,16 +7,28 @@
 }
 
 .detail-header {
+  position: relative;
   background: var(--tile-bg);
   color: var(--tile-fg);
   padding: 10px var(--pad) 12px;
 }
 
 .detail-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-display);
   font-size: 10px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   opacity: 0.9;
+}
+
+.detail-kind::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--edge);
 }
 
 .detail-title {
@@ -25,6 +37,34 @@
   line-height: 1.2;
   font-weight: var(--weight-title);
   word-break: break-word;
+}
+
+/* Strike line drawn across the title text when the tip is marked done. */
+.detail-title-text {
+  background: linear-gradient(currentColor, currentColor) no-repeat 0 58% / 0 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background-size 220ms var(--ease-out);
+}
+
+.detail-leaving .detail-title-text {
+  background-size: 100% 2px;
+}
+
+.detail-leaving {
+  animation: detail-out 380ms ease-in forwards;
+}
+
+@keyframes detail-out {
+  0%,
+  55% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
 }
 
 .detail-sub {
@@ -52,16 +92,28 @@
 .detail-meta-key {
   flex: 0 0 48px;
   color: var(--fg-muted);
+  font-family: var(--font-display);
   text-transform: uppercase;
   font-size: 10px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   line-height: 1.6;
+}
+
+.detail-section-title {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: var(--weight-body);
 }
 
 .detail-paper {
   margin: 8px var(--pad) 0;
   padding: 8px;
   background: var(--surface);
+  border-left: 2px solid var(--accent-dim);
 }
 
 .detail-paper-title {
@@ -78,6 +130,92 @@
 
 .detail-paper-ref {
   font-size: 11px;
+}
+
+/* Figure strip from the `images` frontmatter key. */
+.detail-figures {
+  padding: 8px var(--pad) 0;
+}
+
+.detail-figure-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap);
+}
+
+.detail-figure {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--surface-2);
+  background: var(--surface);
+  color: var(--fg);
+  text-align: left;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 300ms var(--ease-out),
+    transform 300ms var(--ease-out),
+    border-color var(--press-ms) ease;
+  transition-delay: calc(var(--i, 0) * 60ms);
+  cursor: zoom-in;
+}
+
+.detail-figure::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 7px;
+  height: 7px;
+  border-top: 1px solid var(--accent);
+  border-left: 1px solid var(--accent);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.detail-figure-ready,
+.detail-figure-error {
+  opacity: 1;
+  transform: none;
+}
+
+.detail-figure-error {
+  cursor: default;
+  border-color: var(--error);
+}
+
+.detail-figure:hover {
+  border-color: var(--accent);
+}
+
+.detail-figure-img {
+  display: block;
+  width: 100%;
+  height: 84px;
+  object-fit: contain;
+  background: var(--surface);
+  padding: 4px;
+}
+
+.detail-figure-error .detail-figure-img {
+  display: none;
+}
+
+.detail-figure-caption {
+  padding: 2px 4px 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-top: 1px solid var(--surface-2);
 }
 
 .detail-body {
@@ -113,10 +251,22 @@
   margin: 2px 0;
 }
 
-.markdown img {
+.markdown input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
+.markdown img,
+.markdown svg {
   display: block;
   max-width: 100%;
+  height: auto;
   margin: 6px 0;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+}
+
+.markdown img {
+  cursor: zoom-in;
 }
 
 .markdown img[data-error]::after {
@@ -126,11 +276,13 @@
 .markdown code {
   background: var(--surface-2);
   padding: 0 3px;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 
 .markdown a {
   color: var(--fg);
+  text-decoration-color: var(--accent-dim);
 }
 
 .detail-links {
@@ -151,4 +303,5 @@
   gap: 2px;
   padding: 4px;
   background: var(--surface);
+  border-top: 1px solid var(--accent-dim);
 }

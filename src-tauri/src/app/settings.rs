@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::sync::github::{validate_dir, validate_repo, RepoRef};
+use crate::sync::weather::MAX_LOCATION_CHARS;
 
 pub const MIN_POLL_SECONDS: u64 = 15;
 pub const MAX_POLL_SECONDS: u64 = 3600;
@@ -26,6 +27,14 @@ pub enum Theme {
     Light,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    #[default]
+    En,
+    Zh,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -42,6 +51,12 @@ pub struct Settings {
     pub theme: Theme,
     pub columns: u32,
     pub show_done: bool,
+    /// UI language of the board and capture windows.
+    pub language: Language,
+    /// Place name for the weather panel; empty turns weather off.
+    pub weather_location: String,
+    /// Show the clock / date / weather panel above the tiles.
+    pub show_panel: bool,
 }
 
 impl Default for Settings {
@@ -60,6 +75,9 @@ impl Default for Settings {
             theme: Theme::Dark,
             columns: 4,
             show_done: false,
+            language: Language::En,
+            weather_location: String::new(),
+            show_panel: true,
         }
     }
 }
@@ -108,6 +126,12 @@ impl Settings {
         s.hotkey
             .parse::<tauri_plugin_global_shortcut::Shortcut>()
             .map_err(|e| format!("hotkey {:?} is not valid: {e}", s.hotkey))?;
+        s.weather_location = s
+            .weather_location
+            .trim()
+            .chars()
+            .take(MAX_LOCATION_CHARS)
+            .collect();
         Ok(s)
     }
 
@@ -203,7 +227,31 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"owner":"x"}"#).unwrap();
         assert_eq!(s.owner, "x");
         assert_eq!(s.poll_seconds, 60);
+        assert_eq!(s.language, Language::En);
+        assert!(s.show_panel);
+        assert!(s.weather_location.is_empty());
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn language_and_weather_fields() {
+        let s: Settings =
+            serde_json::from_str(r#"{"language":"zh","weather_location":"  Brisbane  "}"#)
+                .unwrap();
+        assert_eq!(s.language, Language::Zh);
+        let clean = s.validated().unwrap();
+        assert_eq!(clean.weather_location, "Brisbane");
+        assert!(serde_json::to_string(&clean)
+            .unwrap()
+            .contains("\"language\":\"zh\""));
+        assert!(serde_json::from_str::<Settings>(r#"{"language":"fr"}"#).is_err());
+        let long = Settings {
+            weather_location: "x".repeat(200),
+            ..Default::default()
+        }
+        .validated()
+        .unwrap();
+        assert_eq!(long.weather_location.chars().count(), MAX_LOCATION_CHARS);
     }
 }

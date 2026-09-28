@@ -5,13 +5,23 @@
   perspective: 1400px;
 }
 
+/* Faint CRT scanlines over the whole stage, both faces. */
+.stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, var(--scanline) 0 1px, transparent 1px 3px);
+}
+
 .face {
   position: absolute;
   inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
   backface-visibility: hidden;
-  transition: transform var(--flip-ms) ease-in-out;
+  transition: transform var(--flip-ms) var(--ease-out);
   background: var(--bg);
 }
 
@@ -30,6 +40,34 @@
 
 .stage.open .face-back {
   transform: rotateY(0deg);
+}
+
+/* One orange scan sweep down the back face each time it opens. */
+.face-back::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(to bottom, transparent, var(--accent));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.stage.open .face-back::after {
+  animation: scan var(--flip-ms) linear calc(var(--flip-ms) * 0.6) 1;
+}
+
+@keyframes scan {
+  0% {
+    opacity: 0.9;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(600px);
+  }
 }
 
 .board {
@@ -51,8 +89,64 @@
   font-size: 13px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .face {
-    transition: none;
+/* Figure viewer, above everything. */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  background: var(--overlay);
+  animation: lightbox-in 180ms var(--ease-out);
+}
+
+.lightbox-closing {
+  animation: lightbox-out 160ms ease-in forwards;
+}
+
+.lightbox-img {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  padding: var(--pad);
+  cursor: zoom-out;
+}
+
+.lightbox-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px var(--pad);
+  border-top: 1px solid var(--accent-dim);
+  background: var(--surface);
+}
+
+.lightbox-caption {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes lightbox-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes lightbox-out {
+  to {
+    opacity: 0;
   }
 }

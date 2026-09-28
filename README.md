@@ -49,28 +49,31 @@ The two screenshots above are the real board rendered with sample tips (left:
 the grid, right: a tile flipped open). The hero image at the top and the
 annotated tile are design renders. The board is a 290 px wide strip that docks
 to a screen edge. Everything is flat: one solid colour per tile, zero radius,
-no shadows. The only motion is the flip when a tile opens.
+no shadows. The styling is NERV-issue: near-black ground, one orange accent,
+corner brackets on every tile, a clock / date / weather panel on top, and the
+whole UI in English or 简体中文.
 
 | Kind / state | Colour |
 | ------------ | ------ |
-| task | blue `#2D89EF` |
-| event | teal `#00ABA9` |
-| note | purple `#7E3878` |
-| reading | orange `#DA532C` |
-| deadline, more than 7 days | green `#1E7145` |
-| deadline, within 7 days | yellow `#FFC40D` |
-| deadline, within 48 hours | red `#EE1111` |
-| overdue | crimson `#B91D47` |
+| task | EVA-01 purple `#4A3B6B` |
+| event | deep teal `#2C5F58` |
+| note | slate `#3A4356` |
+| reading | burnt orange `#8C4A22` |
+| deadline, more than 7 days | green `#3F6B3A` |
+| deadline, within 7 days | amber `#A87B1F` |
+| deadline, within 48 hours | EVA-02 red `#9E2F2A` |
+| overdue | crimson `#6E1B2B` |
 
 ## Features
 
 - **Always on top.** A frameless board of Windows 8 style live tiles that stays
   above every window. Drag it by its 20 px strip, or dock it to the left or
   right edge.
-- **One thing is next.** Exactly one tile gets the white edge and the `NEXT`
-  label. The choice is a fixed, explainable score, not a feed.
+- **One thing is next.** Exactly one tile gets the orange edge and the `NEXT`
+  chip. The choice is a fixed, explainable score, not a feed.
 - **Deadline countdown.** `3w`, `5d`, `2d 4h`, `45m`, `overdue 2h`. Colour
-  escalates green → yellow → red → crimson as the date closes in.
+  escalates green → amber → red → crimson as the date closes in. Countdowns,
+  dates and every label are also available in Chinese.
 - **Native toasts.** Windows notifications fire at the remind times you wrote
   in the file, once, and when a new tip arrives from the repo.
 - **GitHub-synced Markdown.** Each tip is a `.md` file with YAML frontmatter in

@@ -16,3 +16,5 @@ or inline in the body:
 
 The app fetches them through the GitHub API, so private repositories work.
 Keep files under 1 MB; larger blobs are not served by the Contents endpoint.
+SVG is welcome (plots exported from matplotlib or Inkscape stay crisp at any
+tile size); png, jpg, gif and webp work too.

@@ -1,6 +1,11 @@
 /* Design tokens — docs/DESIGN.md */
 :root {
-  --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC',
+    system-ui, -apple-system, sans-serif;
+  /* Condensed DIN-like face for labels, clock and the NEXT chip. Ships with Windows 10+. */
+  --font-display: 'Bahnschrift SemiCondensed', 'Bahnschrift', 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI',
+    'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', Consolas, 'Segoe UI Mono', ui-monospace, monospace;
   --weight-title: 300;
   --weight-body: 400;
   --weight-strong: 600;
@@ -9,30 +14,48 @@
   --gap: 6px;
   --pad: 8px;
   --chrome-h: 20px;
+  --panel-h: 52px;
   --radius: 0;
 
-  --bg: #111214;
-  --fg: #f2f2f2;
-  --fg-muted: #9a9a9f;
-  --surface: #1b1c1f;
-  --surface-2: #26272b;
-  --edge: #ffffff;
-  --error: #ee1111;
-  --ok: #00a300;
-  --warn: #ffc40d;
+  /* NERV dark: near-black with a violet bias, warm off-white text, one orange accent. */
+  --bg: #0c0b10;
+  --fg: #e6e1d8;
+  --fg-muted: #8a857d;
+  --surface: #15141a;
+  --surface-2: #1f1e26;
+  --accent: #e0762b;
+  --accent-ink: #0c0b10;
+  --accent-dim: rgb(224 118 43 / 0.35);
+  --edge: var(--accent);
+  --error: #b8372f;
+  --ok: #6fa34a;
+  --warn: #c9962b;
+  --scanline: rgb(255 255 255 / 0.028);
+  --flash: rgb(255 255 255 / 0.22);
+  --overlay: rgb(12 11 16 / 0.94);
 
-  --flip-ms: 220ms;
-  --press-ms: 120ms;
-  --press-scale: 0.97;
+  --flip-ms: 260ms;
+  --press-ms: 160ms;
+  --enter-ms: 380ms;
+  --press-scale: 0.96;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  color-scheme: dark;
 }
 
 :root[data-theme='light'] {
-  --bg: #f3f3f3;
-  --fg: #1a1a1a;
-  --fg-muted: #6b6b70;
-  --surface: #ffffff;
-  --surface-2: #e9e9ec;
-  --edge: #ffffff;
+  --bg: #ece8e0;
+  --fg: #1c1a1f;
+  --fg-muted: #6a665f;
+  --surface: #f6f3ec;
+  --surface-2: #dfd9cd;
+  --accent: #c8611c;
+  --accent-ink: #f6f3ec;
+  --accent-dim: rgb(200 97 28 / 0.35);
+  --scanline: rgb(0 0 0 / 0.03);
+  --flash: rgb(255 255 255 / 0.3);
+  --overlay: rgb(236 232 224 / 0.94);
+  color-scheme: light;
 }
 
 *,
@@ -89,9 +112,14 @@ select:focus-visible {
   padding: 0;
   color: var(--fg);
   text-decoration: underline;
+  text-decoration-color: var(--accent-dim);
   text-underline-offset: 2px;
   text-align: left;
   word-break: break-all;
+}
+
+.link-button:hover {
+  text-decoration-color: var(--accent);
 }
 
 .action {
@@ -99,11 +127,14 @@ select:focus-visible {
   border: 0;
   padding: 6px 8px;
   color: var(--fg);
+  font-family: var(--font-display);
   font-weight: var(--weight-body);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   font-size: 11px;
-  transition: transform var(--press-ms) ease;
+  transition:
+    transform var(--press-ms) var(--ease-out),
+    background-color var(--press-ms) ease;
 }
 
 .action:hover {
@@ -114,11 +145,27 @@ select:focus-visible {
   transform: scale(var(--press-scale));
 }
 
+.action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .action-primary {
   font-weight: var(--weight-strong);
+  color: var(--accent);
 }
 
 .action-back {
   margin-left: auto;
   color: var(--fg-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

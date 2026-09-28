@@ -1,5 +1,6 @@
 import { call, on } from '../api';
-import { CAPTURE_HINT, CAPTURE_PLACEHOLDER, describeCapture } from '../lib/capture-hint';
+import { describeCapture } from '../lib/capture-hint';
+import { setLocale, t } from '../lib/i18n';
 import { el, mount } from './dom';
 
 export const HINT_RESET_MS = 3000;
@@ -17,16 +18,20 @@ export function renderCapture(root: HTMLElement): void {
   const input = el('input', {
     className: 'capture-input',
     type: 'text',
-    placeholder: CAPTURE_PLACEHOLDER,
+    placeholder: t('capturePlaceholder'),
     autocomplete: 'off',
     spellcheck: 'false',
     'aria-label': 'New tip',
   });
-  const hint = el('p', { className: 'capture-hint', text: CAPTURE_HINT, 'aria-live': 'polite' });
+  const hint = el('p', { className: 'capture-hint', text: t('captureHint'), 'aria-live': 'polite' });
   let busy = false;
 
+  const applyLanguage = (): void => {
+    input.placeholder = t('capturePlaceholder');
+    if (!input.value.trim()) hint.textContent = t('captureHint');
+  };
   const resetHint = (): void => {
-    hint.textContent = CAPTURE_HINT;
+    hint.textContent = t('captureHint');
     hint.dataset.state = '';
   };
   const setHint = (text: string, state: 'ok' | 'error'): void => {
@@ -43,7 +48,7 @@ export function renderCapture(root: HTMLElement): void {
     try {
       await call('create_tip', { text });
       input.value = '';
-      setHint('Saved', 'ok');
+      setHint(t('captureSaved'), 'ok');
       await hide();
     } catch (error) {
       setHint(error instanceof Error ? error.message : String(error), 'error');
@@ -55,7 +60,7 @@ export function renderCapture(root: HTMLElement): void {
   };
 
   input.addEventListener('input', () => {
-    hint.textContent = input.value.trim() ? describeCapture(input.value) || CAPTURE_HINT : CAPTURE_HINT;
+    hint.textContent = input.value.trim() ? describeCapture(input.value) || t('captureHint') : t('captureHint');
   });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') void submit();
@@ -66,8 +71,19 @@ export function renderCapture(root: HTMLElement): void {
     }
   });
 
-  mount(root, el('div', { className: 'capture' }, input, hint));
+  mount(root, el('div', { className: 'capture' }, el('span', { className: 'capture-mark', 'aria-hidden': 'true' }), el('div', { className: 'capture-fields' }, input, hint)));
   input.focus();
+
+  // Follow the board's language and theme.
+  const applyState = (settings: { language?: string; theme?: string }): void => {
+    setLocale(settings.language === 'zh' ? 'zh' : 'en');
+    if (settings.theme) document.documentElement.dataset.theme = settings.theme;
+    applyLanguage();
+  };
+  void call('get_state')
+    .then((state) => applyState(state.settings))
+    .catch(() => undefined);
+  void on('board-updated', (state) => applyState(state.settings)).catch(() => undefined);
 
   void on('capture-shown', () => {
     input.value = '';

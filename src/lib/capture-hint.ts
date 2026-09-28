@@ -25,7 +25,7 @@ function tokenize(input: string): string[] {
   let cur = '';
   let quoted = false;
   for (const c of input) {
-    if (c === '"') quoted = !quoted;
+    if (c === '"' || c === '“' || c === '”') quoted = !quoted;
     else if (/\s/.test(c) && !quoted) {
       if (cur) out.push(cur);
       cur = '';
@@ -35,7 +35,15 @@ function tokenize(input: string): string[] {
   return out;
 }
 
-function parseToken(acc: Parsed, tok: string): Parsed {
+/** Full-width forms typed under a Chinese IME are treated as their ASCII marker. */
+function normaliseMarker(tok: string): string {
+  const map: Record<string, string> = { '＃': '#', '！': '!', '＠': '@', '＾': '^', '＞': '>' };
+  const first = tok.charAt(0);
+  return map[first] ? map[first] + tok.slice(1) : tok;
+}
+
+function parseToken(acc: Parsed, raw: string): Parsed {
+  const tok = normaliseMarker(raw);
   if (tok.startsWith('#') && tok.length > 1) return { ...acc, tags: [...acc.tags, tok.slice(1)] };
   const lower = tok.slice(1).toLowerCase();
   if (tok.startsWith('!') && ['high', 'h', 'low', 'l'].includes(lower)) {

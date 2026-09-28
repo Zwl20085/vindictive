@@ -1,4 +1,6 @@
 import type { BoardState, Tip } from '../types';
+import { t } from '../lib/i18n';
+import type { ImageResolver } from '../lib/markdown';
 import { parseNaive } from '../lib/time';
 import { el, mount } from './dom';
 import { renderTile } from './tile';
@@ -11,6 +13,12 @@ export interface BoardOptions {
   state: BoardState;
   now: Date;
   onOpen: (id: string) => void;
+  /**
+   * Ids already shown on the board. Tiles not in the set play the entry
+   * animation and are added to it; pass nothing to animate every tile.
+   */
+  seen?: Set<string>;
+  resolveImage?: ImageResolver;
 }
 
 export function clampColumns(value: number | undefined): number {
@@ -32,15 +40,13 @@ export function visibleTips(state: BoardState, now: Date): Tip[] {
 }
 
 function emptyMessage(state: BoardState): HTMLElement {
-  const text = state.has_token
-    ? 'Nothing to do. Add a tip with the hotkey or on GitHub.'
-    : 'Open Settings (right-click the top strip) and add your GitHub token.';
+  const text = state.has_token ? t('emptyWithToken') : t('emptyNoToken');
   return el('p', { className: 'board-empty', text });
 }
 
 /** Render the tile grid into a fresh element. */
 export function renderBoard(options: BoardOptions): HTMLElement {
-  const { state, now, onOpen } = options;
+  const { state, now, onOpen, seen, resolveImage } = options;
   const columns = clampColumns(state.settings.columns);
   const grid = el('div', { className: 'board', role: 'list' });
   grid.style.setProperty('--cols', String(columns));
@@ -50,9 +56,13 @@ export function renderBoard(options: BoardOptions): HTMLElement {
     mount(grid, emptyMessage(state));
     return grid;
   }
-  const tiles = tips.map((tip) =>
-    renderTile({ tip, isNextUp: tip.id === state.next_up, now, columns, onOpen }),
-  );
+  let entering = 0;
+  const tiles = tips.map((tip) => {
+    const fresh = !seen || !seen.has(tip.id);
+    const enterIndex = fresh ? entering++ : undefined;
+    seen?.add(tip.id);
+    return renderTile({ tip, isNextUp: tip.id === state.next_up, now, columns, onOpen, enterIndex, resolveImage });
+  });
   mount(grid, ...tiles);
   return grid;
 }

@@ -1,4 +1,5 @@
 import type { Kind } from '../types';
+import { kindLabel } from '../lib/i18n';
 
 /** Monochrome kind glyphs, see docs/DESIGN.md. */
 export const KIND_GLYPH: Record<Kind, string> = {
@@ -9,10 +10,7 @@ export const KIND_GLYPH: Record<Kind, string> = {
   event: '◈', // ◈
 };
 
-export const KIND_LABEL: Record<Kind, string> = {
-  task: 'Task',
-  deadline: 'Deadline',
-  note: 'Note',
-  reading: 'Reading',
-  event: 'Event',
-};
+/** Localised kind label for the active language. */
+export function labelFor(kind: Kind): string {
+  return kindLabel(kind);
+}

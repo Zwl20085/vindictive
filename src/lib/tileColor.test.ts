@@ -40,7 +40,7 @@ describe('tileColor', () => {
     expect(tileColor(d('2026-12-01T00:00:00'), now).bg).toBe(DEADLINE_COLORS.later);
     expect(tileColor(d('2026-10-05T00:00:00'), now)).toEqual({
       bg: DEADLINE_COLORS.soon,
-      fg: DARK_FG,
+      fg: foregroundFor(DEADLINE_COLORS.soon),
       overdue: false,
     });
     expect(tileColor(d('2026-10-02T00:00:00'), now).bg).toBe(DEADLINE_COLORS.critical);
@@ -71,6 +71,7 @@ describe('colour helpers', () => {
     expect(luminance('#fff')).toBeCloseTo(1);
     expect(foregroundFor('#FFC40D')).toBe(DARK_FG);
     expect(foregroundFor('#2D89EF')).toBe(LIGHT_FG);
+    expect(foregroundFor(KIND_COLORS.reading)).toBe(LIGHT_FG);
     expect(foregroundFor('nope')).toBe(LIGHT_FG);
   });
 });

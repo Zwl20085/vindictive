@@ -39,6 +39,17 @@ The app needs to read and write files in that one repository, nothing else.
 3. Paste the token in the token field and press **Save**.
 4. Press **Test connection**. You should see `OK: n tips in owner/repo/tips`.
 
+## 4. Optional: language, weather, panel
+
+In the same Settings overlay:
+
+- **Language**: English or 中文. Applies to the board, the detail view, the
+  settings and the capture bar.
+- **Weather city**: a place name such as `Brisbane` or `南京`. The app looks it
+  up on Open-Meteo (no account needed) and shows the current conditions in the
+  panel above the tiles. Leave it blank to turn weather off.
+- **Show clock and weather panel**: hides the whole panel when unticked.
+
 The token goes to **Windows Credential Manager** under the generic credential
 `vindictive` (user name `github`). It is never written to a settings file, the
 tips repo, or a log. To remove it: Control Panel → Credential Manager →

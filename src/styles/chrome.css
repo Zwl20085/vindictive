@@ -12,6 +12,7 @@
   gap: 6px;
   padding: 0 var(--pad);
   background: var(--bg);
+  border-bottom: 1px solid var(--accent-dim);
   cursor: grab;
 }
 
@@ -20,11 +21,21 @@
 }
 
 .chrome-title {
+  font-family: var(--font-display);
   font-size: 10px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: var(--fg-muted);
+  color: var(--accent);
   font-weight: var(--weight-body);
+}
+
+/* NERV caution hatch, right end of the strip. */
+.chrome-hatch {
+  margin-left: auto;
+  width: 28px;
+  height: 6px;
+  background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 7px);
+  opacity: 0.55;
 }
 
 .sync-dot {
@@ -41,10 +52,21 @@
 
 .sync-dot[data-state='syncing'] {
   background: var(--warn);
+  animation: sync-pulse 900ms ease-in-out infinite;
 }
 
 .sync-dot[data-state='error'] {
   background: var(--error);
+}
+
+@keyframes sync-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }
 
 .error-line {
@@ -61,6 +83,16 @@
 
 .error-line.visible {
   display: block;
+  animation: error-in 200ms var(--ease-out);
+}
+
+@keyframes error-in {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 .menu {
@@ -72,6 +104,20 @@
   min-width: 140px;
   background: var(--surface-2);
   color: var(--fg);
+  border-left: 2px solid var(--accent);
+  animation: menu-in 120ms var(--ease-out);
+  transform-origin: top left;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .menu-item {
@@ -93,4 +139,5 @@
   display: inline-block;
   width: 10px;
   font-size: 10px;
+  color: var(--accent);
 }

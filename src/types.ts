@@ -13,6 +13,7 @@ export type Status = 'open' | 'done';
 export type Urgency = 'none' | 'later' | 'soon' | 'critical' | 'overdue';
 export type Dock = 'left' | 'right' | 'free';
 export type Theme = 'dark' | 'light';
+export type Language = 'en' | 'zh';
 
 export interface Paper {
   title: string;
@@ -38,6 +39,7 @@ export interface Tip {
   remind?: string[];
   location?: string;
   links?: string[];
+  /** Figures (png, jpg, svg, …) relative to the tips directory or absolute URLs. */
   images?: string[];
   tags?: string[];
   repeat?: string;
@@ -76,6 +78,28 @@ export interface Settings {
   /** Grid columns on the board (2..6). */
   columns: number;
   show_done: boolean;
+  /** UI language. */
+  language: Language;
+  /** City or place name for the weather panel; empty disables weather. */
+  weather_location: string;
+  /** Show the clock / date / weather panel above the board. */
+  show_panel: boolean;
+}
+
+/** Current conditions, fetched by the backend from Open-Meteo. */
+export interface Weather {
+  /** Resolved place name, e.g. `Brisbane`. */
+  location: string;
+  temperature_c: number;
+  high_c?: number;
+  low_c?: number;
+  humidity?: number;
+  wind_kmh?: number;
+  /** WMO weather interpretation code (0..99). */
+  code: number;
+  is_day: boolean;
+  /** Naive local timestamp of the fetch. */
+  fetched_at: string;
 }
 
 export interface BoardState {
@@ -115,6 +139,8 @@ export interface Commands {
   fetch_image: (args: { path: string }) => string;
   /** Fetch arXiv / Crossref metadata into `paper`. */
   enrich_tip: (args: { id: string }) => BoardState;
+  /** Current weather for `settings.weather_location`; `null` when unset. Cached ~20 min. */
+  fetch_weather: () => Weather | null;
   show_capture: () => void;
   hide_capture: () => void;
   /** Move the board to a screen edge or leave it free. */

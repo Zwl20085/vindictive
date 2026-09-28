@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isRelativeSrc, renderMarkdown, resolveImages } from './markdown';
+import { isRelativeSrc, isSvgSource, looksLikeImage, renderMarkdown, resolveImages } from './markdown';
 
 describe('renderMarkdown', () => {
   it('renders GFM and sanitises scripts', () => {
@@ -16,14 +16,32 @@ describe('renderMarkdown', () => {
   it('handles empty input', () => {
     expect(renderMarkdown('')).toBe('');
   });
+  it('keeps inline svg but strips scripts and handlers inside it', () => {
+    const html = renderMarkdown(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" onload="alert(1)"><circle cx="5" cy="5" r="4" fill="#E0762B"/><script>alert(2)</script><foreignObject><div>x</div></foreignObject></svg>',
+    );
+    expect(html).toContain('<svg');
+    expect(html).toContain('<circle');
+    expect(html).not.toContain('onload');
+    expect(html).not.toContain('<script');
+    expect(html).not.toContain('foreignObject');
+  });
 });
 
-describe('isRelativeSrc', () => {
+describe('source helpers', () => {
   it('detects relative sources', () => {
     expect(isRelativeSrc('figures/a.png')).toBe(true);
     expect(isRelativeSrc('https://x/a.png')).toBe(false);
     expect(isRelativeSrc('data:image/png;base64,AA')).toBe(false);
     expect(isRelativeSrc(null)).toBe(false);
+  });
+  it('recognises svg and image extensions', () => {
+    expect(isSvgSource('figures/a.svg')).toBe(true);
+    expect(isSvgSource('data:image/svg+xml;utf8,<svg/>')).toBe(true);
+    expect(isSvgSource('a.png')).toBe(false);
+    expect(looksLikeImage('a.PNG')).toBe(true);
+    expect(looksLikeImage('a.webp?x=1')).toBe(true);
+    expect(looksLikeImage('a.pdf')).toBe(false);
   });
 });
 

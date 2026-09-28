@@ -1,5 +1,6 @@
 /** Immutable UI state container with subscriptions. */
-import type { BoardState } from '../types';
+import type { BoardState, Weather } from '../types';
+import type { WeatherStatus } from './panel';
 
 export type View = { kind: 'board' } | { kind: 'detail'; id: string } | { kind: 'settings' };
 export type SyncStatus = 'ok' | 'syncing' | 'error' | 'idle';
@@ -8,6 +9,8 @@ export interface UiState {
   board?: BoardState;
   view: View;
   sync: SyncStatus;
+  weather?: Weather;
+  weatherStatus: WeatherStatus;
 }
 
 type Subscriber = (state: UiState, previous: UiState) => void;
@@ -16,7 +19,7 @@ export class Store {
   private state: UiState;
   private readonly subscribers = new Set<Subscriber>();
 
-  constructor(initial: UiState = { view: { kind: 'board' }, sync: 'idle' }) {
+  constructor(initial: UiState = { view: { kind: 'board' }, sync: 'idle', weatherStatus: 'off' }) {
     this.state = initial;
   }
 

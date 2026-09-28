@@ -1,5 +1,6 @@
 import './styles/tokens.css';
 import './styles/chrome.css';
+import './styles/panel.css';
 import './styles/board.css';
 import './styles/tile.css';
 import './styles/detail.css';

@@ -19,6 +19,7 @@ links:
 tags: [ecce, paper]
 images:
   - figures/coil-thermal.png     # relative to the tips directory
+  - figures/ac-loss-sweep.svg    # png, jpg, gif, webp, svg, or an https URL
 repeat: weekly on mon at 10:00   # daily | weekdays | weekly on mon,thu | monthly on 1 | yearly on 03-15
 color: "#FF0097"                 # optional tile colour override
 arxiv: 2401.12345                # or
@@ -29,7 +30,23 @@ Body in **Markdown**. Checklists, images, links all work.
 
 - [ ] regenerate Fig. 4 with the 12 kHz data
 - [ ] update author ORCID
+
+![hotspot](figures/coil-thermal.png)
+
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40">
+  <polyline fill="none" stroke="#E0762B" stroke-width="2" points="4,36 40,28 80,14 116,6"/>
+</svg>
 ```
+
+## Figures
+
+- `images` entries appear as a thumbnail strip in the tile's detail view and
+  the first one is ghosted onto the tile itself when it is `md` or `wide`.
+  Click a thumbnail to view it full-window.
+- Body images (`![alt](path)`) are resolved the same way and also open the
+  viewer. Relative paths go through the GitHub API, so private repos work.
+- Inline `<svg>` in the body is rendered as-is after sanitising: scripts,
+  event handlers, `<style>` and `<foreignObject>` are removed.
 
 ## Keys the app writes
 

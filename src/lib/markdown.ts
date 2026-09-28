@@ -19,11 +19,18 @@ function installHooks(): void {
   });
 }
 
-/** Render Markdown to sanitised HTML. Synchronous. */
+/**
+ * Render Markdown to sanitised HTML. Synchronous. Inline `<svg>` is kept
+ * (scripts, event handlers and foreignObject are stripped) so a tip body can
+ * carry a small hand-drawn figure without a separate file.
+ */
 export function renderMarkdown(markdown: string): string {
   installHooks();
   const html = marked.parse(markdown ?? '', { async: false, gfm: true, breaks: false }) as string;
-  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    FORBID_TAGS: ['foreignObject', 'style'],
+  });
 }
 
 export function isRelativeSrc(src: string | null): src is string {
@@ -51,4 +58,14 @@ export async function resolveImages(root: ParentNode, resolve: ImageResolver): P
       }
     }),
   );
+}
+
+const IMAGE_EXT_RE = /\.(svg|png|jpe?g|gif|webp|bmp)(\?.*)?$/i;
+
+export function isSvgSource(src: string): boolean {
+  return /\.svg(\?.*)?$/i.test(src.trim()) || /^data:image\/svg\+xml/i.test(src.trim());
+}
+
+export function looksLikeImage(src: string): boolean {
+  return IMAGE_EXT_RE.test(src.trim()) || /^data:image\//i.test(src.trim());
 }

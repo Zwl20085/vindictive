@@ -13,6 +13,7 @@ use crate::core::capture;
 use crate::core::tip::{slugify, Kind, Tip};
 use crate::sync::github::{validate_dir, GithubClient};
 use crate::sync::meta;
+use crate::sync::weather::{self, Weather};
 
 const MAX_CAPTURE_CHARS: usize = 500;
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -204,6 +205,23 @@ pub async fn enrich_tip(
 ) -> Result<BoardState, String> {
     enrich(&app, &id).await?;
     Ok(state.snapshot())
+}
+
+/// Current weather for the configured place, `None` when weather is off.
+/// Results are cached for a while so the panel can ask freely.
+#[tauri::command]
+pub async fn fetch_weather(state: State<'_, AppState>) -> Result<Option<Weather>, String> {
+    let place = state.settings().weather_location.trim().to_string();
+    if place.is_empty() {
+        return Ok(None);
+    }
+    let now = now();
+    if let Some(cached) = state.fresh_weather(&place, now) {
+        return Ok(Some(cached));
+    }
+    let fetched = weather::fetch(&place, now).await.map_err(|e| e.to_string())?;
+    state.cache_weather(&place, fetched.clone());
+    Ok(Some(fetched))
 }
 
 #[tauri::command]

@@ -12,6 +12,9 @@ function at(now: Date, offsetMs: number): string {
   return toNaive(new Date(now.getTime() + offsetMs));
 }
 
+/** `?lang=zh&theme=light&panel=0` on the dev URL pick the mock's settings, for screenshots. */
+const query = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+
 export const SAMPLE_SETTINGS: Settings = {
   owner: 'Zwl20085',
   repo: 'vindictive-tips',
@@ -23,9 +26,12 @@ export const SAMPLE_SETTINGS: Settings = {
   always_on_top: true,
   autostart: false,
   notify_new_tips: true,
-  theme: 'dark',
+  theme: query.get('theme') === 'light' ? 'light' : 'dark',
   columns: 4,
   show_done: false,
+  language: query.get('lang') === 'zh' ? 'zh' : 'en',
+  weather_location: query.get('weather') ?? 'Brisbane',
+  show_panel: query.get('panel') !== '0',
 };
 
 /** Realistic researcher sample data for browser development. */
@@ -59,7 +65,7 @@ export function sampleTips(now: Date): Tip[] {
       links: ['https://mc.manuscriptcentral.com/tie'],
       tags: ['tie', 'revision'],
       body: 'Reviewer 2 wants the thermal model validated at 12 kHz.\n\n![thermal](figures/coil-thermal.png)',
-      images: ['figures/coil-thermal.png'],
+      images: ['figures/coil-thermal.png', 'figures/ac-loss-sweep.svg'],
     },
     {
       id: 'group-meeting',
@@ -109,14 +115,19 @@ export function sampleTips(now: Date): Tip[] {
     {
       id: 'note-winding-factor',
       path: 'tips/note-winding-factor.md',
-      title: 'Winding factor derivation for 6-layer hairpin',
+      title: '六层扁线绕组的绕组系数推导',
       kind: 'note',
       priority: 'low',
       status: 'open',
       remind_at: [],
-      tags: ['theory'],
-      images: ['figures/slot-star.png'],
-      body: '- [ ] Redo the star-of-slots for q = 2\n- [ ] Cross-check with the FE result\n\n![star](figures/slot-star.png)',
+      tags: ['theory', '理论'],
+      images: ['figures/slot-star.svg'],
+      body:
+        '- [ ] 重新推导 q = 2 的槽星形图\n- [ ] 与有限元结果交叉验证\n\n' +
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120" viewBox="0 0 200 120" role="img" aria-label="star of slots">' +
+        '<g stroke="#8A857D" fill="none"><circle cx="100" cy="60" r="48"/>' +
+        '<path d="M100 60 L100 12 M100 60 L141.6 36 M100 60 L141.6 84 M100 60 L100 108 M100 60 L58.4 84 M100 60 L58.4 36" stroke="#E0762B"/></g>' +
+        '<text x="104" y="10" font-size="9" fill="#E6E1D8">A+</text></svg>',
     },
     {
       id: 'order-thermocouples',

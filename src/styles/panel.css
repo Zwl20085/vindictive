@@ -1,0 +1,115 @@
+/* Clock / date / weather panel between the strip and the board. */
+.panel {
+  flex: 0 0 auto;
+  min-height: var(--panel-h);
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px var(--pad) 6px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--accent-dim);
+  cursor: grab;
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.panel:active {
+  cursor: grabbing;
+}
+
+.panel-time,
+.panel-weather {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.panel-weather {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.panel-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.panel-hm {
+  font-size: 24px;
+  letter-spacing: 0.04em;
+}
+
+.panel-sec {
+  font-size: 11px;
+  color: var(--fg-muted);
+  letter-spacing: 0.1em;
+}
+
+.panel-sec::before {
+  content: ':';
+  margin-right: 1px;
+}
+
+.panel-date,
+.panel-weather-detail {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel-now {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--font-display);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.panel-glyph {
+  font-size: 15px;
+  color: var(--fg);
+}
+
+.panel-temp {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.panel-place {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel[data-weather='loading'] .panel-glyph {
+  animation: sync-pulse 900ms ease-in-out infinite;
+}
+
+.panel[data-weather='error'] .panel-weather-detail {
+  color: var(--error);
+}
+
+/* Weather column collapses to a single line when off. */
+.panel[data-weather='off'] .panel-now {
+  display: none;
+}

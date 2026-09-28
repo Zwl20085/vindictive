@@ -1,4 +1,5 @@
 import type { BoardState, Dock } from '../types';
+import { t } from '../lib/i18n';
 import { formatClock, parseNaive } from '../lib/time';
 import { el } from './dom';
 import { showMenu } from './menu';
@@ -18,24 +19,27 @@ export interface ChromeOptions {
   actions: ChromeActions;
 }
 
+/** Brand mark on the strip; deliberately not translated. */
+export const BRAND = 'VINDICTIVE';
+
 function syncTitle(state: BoardState | undefined, sync: SyncStatus): string {
-  if (sync === 'syncing') return 'Syncing…';
-  if (state?.sync_error) return `Sync error: ${state.sync_error}`;
+  if (sync === 'syncing') return t('syncing');
+  if (state?.sync_error) return `${t('syncError')}: ${state.sync_error}`;
   const last = parseNaive(state?.last_sync);
-  return last ? `Synced ${formatClock(last)}` : 'Not synced yet';
+  return last ? `${t('synced')} ${formatClock(last)}` : t('notSynced');
 }
 
 function buildMenu(options: ChromeOptions, x: number, y: number): void {
   const { state, actions } = options;
   const dock = state?.settings.dock;
   showMenu(x, y, [
-    { label: 'Sync now', onSelect: actions.onSync },
-    { label: 'Settings', onSelect: actions.onSettings },
-    { label: 'Show done', checked: state?.settings.show_done, onSelect: actions.onToggleDone },
-    { label: 'Dock left', checked: dock === 'left', onSelect: () => actions.onDock('left') },
-    { label: 'Dock right', checked: dock === 'right', onSelect: () => actions.onDock('right') },
-    { label: 'Free', checked: dock === 'free', onSelect: () => actions.onDock('free') },
-    { label: 'Quit', onSelect: actions.onQuit },
+    { label: t('menuSync'), onSelect: actions.onSync },
+    { label: t('menuSettings'), onSelect: actions.onSettings },
+    { label: t('menuShowDone'), checked: state?.settings.show_done, onSelect: actions.onToggleDone },
+    { label: t('menuDockLeft'), checked: dock === 'left', onSelect: () => actions.onDock('left') },
+    { label: t('menuDockRight'), checked: dock === 'right', onSelect: () => actions.onDock('right') },
+    { label: t('menuFree'), checked: dock === 'free', onSelect: () => actions.onDock('free') },
+    { label: t('menuQuit'), onSelect: actions.onQuit },
   ]);
 }
 
@@ -53,7 +57,8 @@ export function renderChrome(options: ChromeOptions): HTMLElement {
     'header',
     { className: 'chrome', 'data-tauri-drag-region': true, title: syncTitle(state, sync) },
     dot,
-    el('span', { className: 'chrome-title', 'data-tauri-drag-region': true, text: 'vindictive' }),
+    el('span', { className: 'chrome-title', 'data-tauri-drag-region': true, text: BRAND }),
+    el('span', { className: 'chrome-hatch', 'data-tauri-drag-region': true, 'aria-hidden': 'true' }),
   );
   strip.addEventListener('contextmenu', (event) => {
     event.preventDefault();
