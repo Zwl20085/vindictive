@@ -9,7 +9,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use app::state::AppState;
 use app::storage::Storage;
-use app::{commands, scheduler, tray, windows};
+use app::{commands, editor, scheduler, tray, windows};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -51,7 +51,8 @@ pub fn run() {
             let handle = app.handle().clone();
             tray::build(&handle)?;
             windows::apply_initial(&handle, &settings);
-            scheduler::start(handle);
+            scheduler::start(handle.clone());
+            editor::start(handle);
             Ok(())
         })
         .on_window_event(|window, event| match (window.label(), event) {
@@ -71,6 +72,8 @@ pub fn run() {
             commands::mark_done,
             commands::reopen,
             commands::snooze,
+            commands::delete_tip,
+            commands::edit_local,
             commands::create_tip,
             commands::save_settings,
             commands::set_token,

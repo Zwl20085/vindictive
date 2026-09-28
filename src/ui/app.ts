@@ -1,7 +1,12 @@
 import { call, onBoardUpdated, openExternal } from '../api';
 import type { BoardState, Dock, Settings } from '../types';
-import { setLocale } from '../lib/i18n';
-import { handleBoardKeys, renderBoard } from './board';
+import { setLocale, t } from '../lib/i18n';
+import { minutesUntilTomorrowMorning } from '../lib/time';
+import { renderAddBar } from './addbar';
+import { SNOOZE_HOUR_MINUTES } from './detail';
+import { editUrl } from '../lib/github';
+import { showMenu } from './menu';
+import { fitTitles, handleBoardKeys, renderBoard } from './board';
 import { renderChrome } from './chrome';
 import { renderDetail } from './detail';
 import { el, mount } from './dom';
@@ -40,7 +45,7 @@ export class App {
     this.store.subscribe((state, previous) => {
       this.renderChrome(state);
       this.renderPanel(state);
-      if (state.board !== previous.board || state.view !== previous.view) this.renderFaces(state);
+      if (state.board !== previous.board || state.view !== previous.view || state.adding !== previous.adding) this.renderFaces(state);
     });
     document.addEventListener('keydown', (e) => this.onKey(e));
     await onBoardUpdated((board) => this.applyBoard(board)).catch((e) => showError('event subscription', e));
@@ -48,6 +53,7 @@ export class App {
     this.openFromHash();
     setInterval(() => this.renderFaces(this.store.get()), TICK_MS);
     setInterval(() => void this.loadWeather(true), WEATHER_MS);
+    window.addEventListener('resize', () => this.scheduleFit());
   }
 
   /** `#tip=<id>` opens that tip's detail on load (dev and deep links). */
@@ -105,15 +111,49 @@ export class App {
 
   private onKey(event: KeyboardEvent): void {
     if (isLightboxOpen()) return; // the lightbox handles Esc itself
-    const { view } = this.store.get();
+    const { view, adding } = this.store.get();
+    const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
     if (event.key === 'Escape' && view.kind !== 'board') {
       this.back_();
       return;
     }
-    if (view.kind === 'board') {
+    if (view.kind === 'board' && !typing) {
+      if ((event.key === 'n' || event.key === '+' || event.key === 'Insert') && !adding) {
+        event.preventDefault();
+        this.store.set({ adding: true });
+        return;
+      }
       const grid = this.front.querySelector<HTMLElement>('.board');
       if (grid) handleBoardKeys(grid, event);
     }
+  }
+
+  /** Right-click menu on a tile: the detail actions without flipping. */
+  private tileMenu(id: string, x: number, y: number): void {
+    const tip = this.store.get().board?.tips.find((t) => t.id === id);
+    const settings = this.store.get().board?.settings;
+    if (!tip || !settings) return;
+    const a = this.detailActions();
+    const open = tip.status === 'open';
+    showMenu(x, y, [
+      open ? { label: t('done'), onSelect: () => a.onDone(id) } : { label: t('reopen'), onSelect: () => a.onReopen(id) },
+      ...(open
+        ? [
+            { label: t('snooze1h'), onSelect: () => a.onSnooze(id, SNOOZE_HOUR_MINUTES) },
+            { label: t('tomorrow'), onSelect: () => a.onSnooze(id, minutesUntilTomorrowMorning(new Date())) },
+          ]
+        : []),
+      { label: t('editLocal'), onSelect: () => a.onEditLocal(id) },
+      { label: t('editOnGithub'), onSelect: () => a.onOpenLink(editUrl(settings, tip.path)) },
+      {
+        label: `${t('delete')}…`,
+        onSelect: () =>
+          showMenu(x, y, [
+            { label: `${t('deleteTip')}: ${tip.title}`, onSelect: () => a.onDelete(id) },
+            { label: t('cancel'), onSelect: () => undefined },
+          ]),
+      },
+    ]);
   }
 
   private renderChrome(state: UiState): void {
@@ -135,16 +175,28 @@ export class App {
     const now = new Date();
     mount(
       this.front,
+      state.adding ? renderAddBar(this.addBarActions()) : null,
       renderBoard({
         state: state.board,
         now,
         seen: this.seen,
         resolveImage: this.resolveImage,
         onOpen: (id) => this.store.set({ view: { kind: 'detail', id } }),
+        onMenu: (id, x, y) => this.tileMenu(id, x, y),
+        onAdd: () => this.store.set({ adding: true }),
       }),
     );
+    fitTitles(this.front);
     this.renderBack(state, now);
     this.stage.classList.toggle('open', state.view.kind !== 'board');
+  }
+
+  private fitTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Re-fit titles after the window stops resizing (the tile unit follows the width). */
+  private scheduleFit(): void {
+    if (this.fitTimer) clearTimeout(this.fitTimer);
+    this.fitTimer = setTimeout(() => fitTitles(this.front), 80);
   }
 
   private renderBack(state: UiState, now: Date): void {
@@ -165,6 +217,17 @@ export class App {
   private back_(): void {
     closeLightbox();
     this.store.set({ view: { kind: 'board' } });
+  }
+
+  private addBarActions() {
+    return {
+      onSubmit: async (text: string) => {
+        const board = await call('create_tip', { text });
+        this.applyBoard(board);
+        this.store.set({ adding: false });
+      },
+      onCancel: () => this.store.set({ adding: false }),
+    };
   }
 
   private chromeActions() {
@@ -194,6 +257,11 @@ export class App {
       onDone: (id: string) => void this.mutate(() => call('mark_done', { id }), 'mark_done').then(() => this.back_()),
       onReopen: (id: string) => void this.mutate(() => call('reopen', { id }), 'reopen'),
       onSnooze: (id: string, minutes: number) => void this.mutate(() => call('snooze', { id, minutes }), 'snooze').then(() => this.back_()),
+      onDelete: (id: string) => void this.mutate(() => call('delete_tip', { id }), 'delete_tip').then(() => this.back_()),
+      onEditLocal: (id: string) =>
+        void guard('edit_local', () => call('edit_local', { id })).then((path) => {
+          if (path) showError(t('openedIn'), path);
+        }),
       onOpenLink: (url: string) => void guard('open link', () => openExternal(url)),
       onBack: () => this.back_(),
       resolveImage: this.resolveImage,

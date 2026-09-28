@@ -71,7 +71,7 @@ export function renderCapture(root: HTMLElement): void {
     }
   });
 
-  mount(root, el('div', { className: 'capture' }, el('span', { className: 'capture-mark', 'aria-hidden': 'true' }), el('div', { className: 'capture-fields' }, input, hint)));
+  mount(root, el('div', { className: 'capture' }, input, hint));
   input.focus();
 
   // Follow the board's language and theme.

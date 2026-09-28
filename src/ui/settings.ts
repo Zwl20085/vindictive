@@ -21,7 +21,7 @@ export interface SettingsOptions {
 }
 
 const DOCKS: Dock[] = ['right', 'left', 'free'];
-const THEMES: Theme[] = ['dark', 'light'];
+const THEMES: Theme[] = ['dark', 'light', 'nerv', 'cobalt', 'paper'];
 
 function field(label: string, name: string, input: HTMLElement): HTMLElement {
   const id = `set-${name}`;
@@ -72,6 +72,7 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
     language: language as Language,
     columns: clampColumns(Number(str('columns'))),
     weather_location: str('weather_location').slice(0, MAX_WEATHER_LOCATION_CHARS),
+    editor_command: str('editor_command'),
     show_panel: bool('show_panel'),
     always_on_top: bool('always_on_top'),
     autostart: bool('autostart'),
@@ -144,6 +145,7 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
     group(
       t('dock'),
       field(t('hotkey'), 'hotkey', text('hotkey', s.hotkey)),
+      field(t('editorCommand'), 'editor_command', text('editor_command', s.editor_command, 'text', { placeholder: 'code' })),
       field(t('dock'), 'dock', select('dock', s.dock, DOCKS)),
       check('always_on_top', s.always_on_top, t('alwaysOnTop')),
       check('autostart', s.autostart, t('autostart')),

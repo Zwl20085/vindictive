@@ -142,6 +142,15 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
     return update({ tips: replaceTip(id, (t) => ({ ...t, snoozed_until: until, snoozed_until_at: until })) });
   },
   create_tip: ({ text }) => update({ tips: [createTip(text), ...store.tips] }),
+  edit_local: ({ id }) => {
+    const tip = store.tips.find((t) => t.id === id);
+    if (!tip) throw new Error(`no tip with id ${id}`);
+    return `C:\\Users\\you\\AppData\\Roaming\\dev.zhangwentao.vindictive\\edit\\${tip.path.replace(/\//g, '\\')}`;
+  },
+  delete_tip: ({ id }) => {
+    if (!store.tips.some((t) => t.id === id)) throw new Error(`no tip with id ${id}`);
+    return update({ tips: store.tips.filter((t) => t.id !== id) });
+  },
   frontend_log: ({ level, message }) => {
     if (level === 'error') console.error(`[mock log] ${message}`);
   },

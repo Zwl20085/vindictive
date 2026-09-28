@@ -14,14 +14,32 @@ export interface TileOptions {
   now: Date;
   columns: number;
   onOpen: (id: string) => void;
+  /** Right-click: show the tile's action menu at the pointer. */
+  onMenu?: (id: string, x: number, y: number) => void;
   /** Index for the staggered entry animation; `undefined` means no entry animation. */
   enterIndex?: number;
   /** Resolves a figure path to something an `<img>` can show. */
   resolveImage?: ImageResolver;
 }
 
-/** How long the press flash runs before the board flips. */
+/** How long the tilt release runs before the board flips. */
 export const PRESS_MS = 160;
+/** Maximum tilt of a pressed tile, degrees. */
+export const TILT_DEG = 9;
+
+/**
+ * Metro live-tile tilt: lean the tile toward where it was pressed. Writes
+ * `--rx` / `--ry`, which `tile.css` reads in `:active` and in the release
+ * animation. Pressing dead centre only scales.
+ */
+export function tiltFor(button: HTMLElement, clientX: number, clientY: number): { rx: number; ry: number } {
+  const rect = button.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return { rx: 0, ry: 0 };
+  const dx = ((clientX - rect.left) / rect.width) * 2 - 1; // -1 left … 1 right
+  const dy = ((clientY - rect.top) / rect.height) * 2 - 1; // -1 top … 1 bottom
+  const clamp = (v: number): number => Math.max(-1, Math.min(1, v));
+  return { rx: -clamp(dy) * TILT_DEG, ry: clamp(dx) * TILT_DEG };
+}
 
 function countdownText(tip: Tip, now: Date): string | undefined {
   const due = parseNaive(tip.due_at);
@@ -72,7 +90,7 @@ function thumbnail(tip: Tip, resolve: ImageResolver | undefined): HTMLElement | 
 
 /** Build one tile `<button>`. */
 export function renderTile(options: TileOptions): HTMLButtonElement {
-  const { tip, isNextUp, now, columns, onOpen, enterIndex, resolveImage } = options;
+  const { tip, isNextUp, now, columns, onOpen, onMenu, enterIndex, resolveImage } = options;
   const size = tileSize(tip, isNextUp, now);
   const [cols, rows] = spanFor(size, columns);
   const colour = tileColor(tip, now);
@@ -101,6 +119,18 @@ export function renderTile(options: TileOptions): HTMLButtonElement {
   if (enterIndex !== undefined) button.style.setProperty('--i', String(enterIndex));
   button.style.gridColumn = `span ${cols}`;
   button.style.gridRow = `span ${rows}`;
+  button.addEventListener('pointerdown', (event) => {
+    const { rx, ry } = tiltFor(button, event.clientX, event.clientY);
+    button.style.setProperty('--rx', `${rx.toFixed(1)}deg`);
+    button.style.setProperty('--ry', `${ry.toFixed(1)}deg`);
+  });
+  if (onMenu) {
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onMenu(tip.id, event.clientX, event.clientY);
+    });
+  }
   let opening = false;
   button.addEventListener('click', () => {
     if (opening) return;

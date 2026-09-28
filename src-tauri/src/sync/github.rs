@@ -191,6 +191,46 @@ impl GithubClient {
     }
 }
 
+impl GithubClient {
+    /// Delete a file. `sha` must be the blob SHA the board holds; GitHub
+    /// refuses the delete when the file changed since, which surfaces as
+    /// `Conflict` so the caller can resync.
+    pub async fn delete_file(&self, path: &str, sha: &str, message: &str) -> Result<()> {
+        let url = contents_url(&self.repo, path);
+        let body = serde_json::json!({
+            "message": message,
+            "sha": sha,
+            "branch": self.repo.branch,
+        });
+        let res = self
+            .http
+            .delete(&url)
+            .header(ACCEPT, "application/vnd.github+json")
+            .json(&body)
+            .send()
+            .await?;
+        if res.status() == StatusCode::CONFLICT {
+            return Err(GithubError::Conflict {
+                path: path.to_string(),
+            });
+        }
+        if res.status() == StatusCode::UNPROCESSABLE_ENTITY {
+            let body = res.text().await.unwrap_or_default();
+            return Err(if is_sha_mismatch(&body) {
+                GithubError::Conflict {
+                    path: path.to_string(),
+                }
+            } else {
+                GithubError::Status {
+                    status: 422,
+                    body: truncate(&body, 200),
+                }
+            });
+        }
+        check(res, path).await.map(|_| ())
+    }
+}
+
 async fn check(res: reqwest::Response, what: &str) -> Result<reqwest::Response> {
     let status = res.status();
     if status.is_success() {

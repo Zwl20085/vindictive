@@ -8,7 +8,7 @@ use tauri::{AppHandle, State};
 
 use super::settings::{Dock, Settings};
 use super::state::{now, AppState, BoardState};
-use super::{secrets, windows};
+use super::{editor, secrets, windows};
 use crate::core::capture;
 use crate::core::tip::{slugify, Kind, Tip};
 use crate::sync::github::{validate_dir, GithubClient};
@@ -74,6 +74,39 @@ pub async fn snooze(
     let msg = format!("vindictive: snooze \"{}\"", tip.front.title);
     state.save_tip(&app, tip.snooze_until(until), &msg).await?;
     Ok(state.snapshot())
+}
+
+/// Open the tip in the local editor and keep it in sync; returns the file path.
+#[tauri::command]
+pub fn edit_local(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<String, String> {
+    editor::open(&app, &state, &id).map(|p| p.display().to_string())
+}
+
+/// Delete a tip's file from the repository and drop it from the board.
+#[tauri::command]
+pub async fn delete_tip(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<BoardState, String> {
+    let tip = find(&state, &id)?;
+    let sha = tip
+        .sha
+        .clone()
+        .ok_or("this tip has not been synced yet; try again after the next sync")?;
+    let client = state.client()?;
+    let msg = format!("vindictive: delete \"{}\"", tip.front.title);
+    match client.delete_file(&tip.path, &sha, &msg).await {
+        Ok(()) => {
+            state.replace_board(state.board().remove(&id));
+            state.emit(&app);
+            Ok(state.snapshot())
+        }
+        Err(e) => {
+            let _ = state.sync(&app).await;
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]

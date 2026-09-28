@@ -12,6 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use super::board::Board;
+use super::editor::EditSession;
 use super::secrets;
 use super::settings::Settings;
 use super::storage::Storage;
@@ -35,6 +36,8 @@ pub struct Inner {
     pub image_cache: HashMap<String, String>,
     /// Last weather result and the place it was fetched for.
     pub weather: Option<(String, Weather)>,
+    /// Files open in the local editor, by tip id.
+    pub edits: HashMap<String, EditSession>,
 }
 
 pub struct AppState {

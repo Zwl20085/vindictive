@@ -9,9 +9,10 @@ Windows toasts at remind times.
 
 1. **Glanceable.** The board is read from two metres away in under a second.
    One tile is highlighted as *next up*; everything else is context.
-2. **Flat.** Solid colour blocks, no shadows, no gradients, no rounded
-   corners. The look is NERV, not Fluent: near-black ground, one orange
-   accent, thin HUD corner brackets, condensed uppercase labels.
+2. **Flat.** Metro, not Fluent. Solid colour blocks, no shadows, no
+   gradients, no rounded corners, no borders. The one non-Microsoft thing
+   is the typography: titles and the clock are set in a heavy Mincho-like
+   serif, an Evangelion title-card gesture. Everything else is Segoe UI.
 3. **Owned data.** Every tip is a plain `.md` file the user can edit anywhere.
    The app never invents a format that Obsidian or `cat` cannot read.
 4. **Quiet.** Toasts fire only at times the user wrote down. New remote tips
@@ -26,16 +27,17 @@ Windows toasts at remind times.
 
 | Token            | Value                                   |
 | ---------------- | --------------------------------------- |
-| Body typeface    | `Segoe UI Variable Text`, `Segoe UI`, `Microsoft YaHei UI`, `PingFang SC`, system-ui |
-| Display typeface | `Bahnschrift SemiCondensed` (labels, clock, NEXT chip, buttons), same CJK fallbacks |
-| Weights          | 300 for titles on tiles, 400 body, 600 for the next-up label |
-| Board background | dark `#0C0B10` (violet-biased black), light `#ECE8E0` |
-| Text             | dark `#E6E1D8` warm off-white, muted `#8A857D` |
-| Accent           | NERV orange `#E0762B` (light theme `#C8611C`): next-up edge, strip title, clock, primary action |
-| Tile unit        | 64 px square, 6 px gap                  |
-| Tile sizes       | `sm` 1×1, `md` 2×2, `wide` 4×2          |
+| UI typeface      | `Segoe UI Variable Text`, `Segoe UI`, `Microsoft YaHei UI`, `PingFang SC`, system-ui |
+| Title typeface   | `Sitka Display`, Georgia, `Yu Mincho`, `SimSun`, serif at 700: tile titles, detail title, clock, capture input |
+| Weights          | 700 titles, 400 body, 600 for the NEXT label |
+| Board background | dark `#111113`, light `#F0EFEC`         |
+| Text             | dark `#E8E6E1`, muted `#8F8D88`         |
+| Edge             | white: next-up left edge, overdue top edge, focus ring |
+| Tile unit        | `max(64px, (window width - padding - gaps) / columns)`: tiles fill the window |
+| Tile sizes       | `sm` 1x1, `md` 2x2, `wide` 4x2          |
+| Type scale       | every size is a `clamp()` on `vw` (panel, detail) or `cqh` (inside tiles), so text grows with the window |
+| Title fit        | titles start at the `xl` tier (34 % of tile height, 2 lines) and step down to `lg` / default (3 lines) only if they overflow |
 | Corner radius    | 0                                       |
-| Decoration       | 7 px corner brackets on every tile at 35 % opacity, faint scanlines over the stage, caution hatch on the strip |
 | Motion           | see *Motion* below                      |
 
 ### Tile colours (NERV palette)
@@ -62,12 +64,15 @@ white or near-black by luminance.
 
 | Moment | Effect |
 | ------ | ------ |
-| Tiles arrive (first render, new tip) | fade + 8 px rise, 380 ms, staggered 32 ms per tile. Tiles already seen do not replay on the 30 s tick. |
-| Tile clicked | 160 ms press: scale 0.96 with a white flash, then the flip. |
-| Board flips | 260 ms `rotateY`; one orange scan line sweeps down the back face. |
+| Tiles arrive (first render, new tip) | Metro entrance: slide in 28 px from the right while fading, 360 ms, staggered 30 ms per tile. Tiles already seen do not replay on the 30 s tick. |
+| Tile pressed | Metro tilt: the tile leans up to 9 degrees toward the pointer (`--rx` / `--ry` from the press position) at scale 0.97, springs back on release, then the board flips. |
+| Board flips | 240 ms `rotateY`; the back face's content slides in from the right. |
 | Done pressed | strike-through draws across the title, panel slides out left, then the board flips back. |
-| Figure tapped | lightbox fades in over the window (180 ms); Esc / click closes. |
+| Figure tapped | lightbox fades in over the window (200 ms); Esc / click closes. |
+| Menus, capture bar | fade + 6 px slide, 160-200 ms. |
 | Syncing | the sync square pulses; weather glyph pulses while loading. |
+
+All easing is Metro's exponential ease-out (`cubic-bezier(0.1, 0.9, 0.2, 1)`).
 
 Everything honours `prefers-reduced-motion`.
 
@@ -85,8 +90,8 @@ Everything honours `prefers-reduced-motion`.
 
 - **Size rule.** `wide` when it is next-up; `md` for high priority or
   deadlines within 7 days; `sm` otherwise. Grid uses `grid-auto-flow: dense`.
-- **Next-up** tile gets a 2 px orange left edge and an orange "NEXT" chip
-  in the top row.
+- **Next-up** tile gets a 2 px white left edge and the label "NEXT" in the
+  top row.
 - **Countdown** text: `3w`, `5d`, `2d 4h`, `6h`, `45m`, `overdue 2h`
   (Chinese: `3周`, `2天4时`, `已逾期 2时`).
 - **Figure ghost.** `md` and `wide` tiles show the tip's first `images`
@@ -113,16 +118,34 @@ The whole board flips to a single detail panel in the tile's colour:
 ### Board chrome
 
 - 20 px top strip, draggable (`data-tauri-drag-region`), contains a 6 px
-  sync square (green ok, amber syncing, red error), the VINDICTIVE mark in
-  orange and a caution hatch; the last-sync time shows on hover.
-- **Panel** (52 px, draggable, `show_panel` setting): clock `HH:MM` with
-  small seconds, date line (`2026-09-28 MON` / `2026年9月28日 周一`), and
-  weather on the right: glyph, temperature, place, high/low and description.
+  sync square (green ok, amber syncing, red error) and the VINDICTIVE mark;
+  the last-sync time shows on hover.
+- **Panel** (a flat surface block, draggable, `show_panel` setting): clock
+  `HH:MM` with small seconds, date line (`2026-09-28 MON` / `2026年9月28日
+  周一`), and weather on the right: glyph, temperature, place, high/low and
+  description.
   Weather comes from Open-Meteo through the backend (`fetch_weather`), keyed
   by the `weather_location` setting; blank turns it off. The backend caches
   a result for 20 minutes.
 - Right-click on the strip → context menu: Sync now, Settings, Show done,
   Dock left / right / free, Quit.
+- Right-click on a tile → Done / Reopen, Snooze 1h, Tomorrow, Edit on
+  GitHub, Delete… (a second menu confirms). The same actions live in the
+  detail view; there Delete arms on the first click and fires on the second.
+- The last tile on the board is a quiet "+" tile. It (or `n`, `+`, `Insert`)
+  opens an inline new-tip bar above the grid with the quick-capture syntax.
+  Enter creates the file; Esc closes the bar.
+- Themes: `dark`, `light`, `nerv` (near-black, orange edge), `cobalt` (deep
+  blue), `paper` (warm off-white). Themes change only the ground, text and
+  edge tokens; tile colours are shared.
+- **Edit locally** (detail view and tile menu) writes the tip's Markdown to
+  `%APPDATA%\dev.zhangwentao.vindictive\edit\<repo path>`, opens it with
+  the `editor_command` setting (`code` by default; blank means the system
+  default app) and watches it every 2 s. Each save that parses as a tip is
+  pushed to GitHub as one commit, then the file is rewritten in canonical
+  form. If the tip changes elsewhere while the file is untouched, the file is
+  refreshed. A file that does not parse (mid-edit frontmatter) is simply
+  retried after the next save.
 - Settings is an overlay in the same window, in three groups: GitHub (owner,
   repo, branch, dir, token in Windows Credential Manager, poll interval);
   appearance (language, theme, columns, weather city, panel, show done);

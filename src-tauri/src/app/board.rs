@@ -76,6 +76,13 @@ impl Board {
     }
 
     /// Replace one tip by id (or append if missing).
+    /// Board without the tip `id`. Unknown ids are a no-op.
+    pub fn remove(&self, id: &str) -> Board {
+        Board {
+            tips: self.tips.iter().filter(|t| t.id != id).cloned().collect(),
+        }
+    }
+
     pub fn upsert(&self, tip: Tip) -> Board {
         let mut found = false;
         let mut tips: Vec<Tip> = self
@@ -160,6 +167,15 @@ mod tests {
         assert_eq!(next.get("b").unwrap().sha.as_deref(), Some("9"));
         assert_eq!(new_ids, vec!["d"]);
         assert_eq!(board.tips.len(), 2, "original untouched");
+    }
+
+    #[test]
+    fn remove_drops_one_tip() {
+        let board = Board::new(vec![tip("tips/a.md", "1"), tip("tips/b.md", "2")]);
+        let next = board.remove("a");
+        assert_eq!(next.tips.len(), 1);
+        assert!(next.get("a").is_none());
+        assert_eq!(board.remove("zzz").tips.len(), 2);
     }
 
     #[test]

@@ -3,63 +3,40 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 5px 6px;
+  padding: clamp(5px, 7cqh, 14px) clamp(6px, 7cqh, 14px);
   border: 0;
   background: var(--tile-bg);
   color: var(--tile-fg);
   text-align: left;
   overflow: hidden;
-  transition:
-    transform var(--press-ms) var(--ease-out),
-    filter var(--press-ms) ease;
-}
-
-/* HUD corner brackets: top-left and bottom-right. */
-.tile::before,
-.tile::after {
-  content: '';
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  border: 1px solid currentColor;
-  opacity: 0.35;
-  pointer-events: none;
-}
-
-.tile::before {
-  top: 2px;
-  left: 2px;
-  border-right: 0;
-  border-bottom: 0;
-}
-
-.tile::after {
-  right: 2px;
-  bottom: 2px;
-  border-left: 0;
-  border-top: 0;
+  /* Type inside scales with the tile (cqh = 1 % of tile height). */
+  container-type: size;
+  transform-origin: center;
+  transition: transform var(--press-ms) var(--ease-out);
 }
 
 .tile:hover {
-  filter: brightness(1.12);
+  filter: brightness(1.1);
 }
 
-.tile:hover::before,
-.tile:hover::after {
-  opacity: 0.8;
-}
-
+/* Metro tile tilt: the press leans the tile toward the pointer. `--rx` / `--ry`
+   are set from the pointer position in tile.ts. */
 .tile:active {
-  transform: scale(var(--press-scale));
+  transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--press-scale));
 }
 
 .tile-is-next {
-  border-left: 2px solid var(--edge);
-  padding-left: 5px;
+  box-shadow: inset 2px 0 0 var(--edge);
 }
 
 .tile-overdue {
-  border-top: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge);
+}
+
+.tile-is-next.tile-overdue {
+  box-shadow:
+    inset 2px 0 0 var(--edge),
+    inset 0 1px 0 var(--edge);
 }
 
 .tile-done {
@@ -68,7 +45,6 @@
 
 .tile-done .tile-title {
   text-decoration: line-through;
-  text-decoration-color: currentColor;
 }
 
 .tile-top {
@@ -77,19 +53,15 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: var(--font-display);
-  font-size: 10px;
+  font-size: clamp(10px, 9cqh, 18px);
   line-height: 1;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   opacity: 0.92;
 }
 
 .tile-next {
-  padding: 2px 4px 1px;
-  background: var(--edge);
-  color: var(--accent-ink);
   font-weight: var(--weight-strong);
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
 }
 
 .tile-countdown {
@@ -101,6 +73,7 @@
   font-size: 11px;
 }
 
+/* Titles carry the Evangelion typography. */
 .tile-title {
   position: relative;
   z-index: 1;
@@ -108,28 +81,66 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
+  font-family: var(--font-title);
   font-weight: var(--weight-title);
-  font-size: 12px;
-  line-height: 1.2;
-  word-break: break-word;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  /* Size tiers: board.ts starts every title at `xl` and steps down until it
+     fits. Each tier fills the space left under the top row: two big lines,
+     or three smaller ones. */
+  font-size: clamp(12px, 21cqh, 64px);
+  -webkit-line-clamp: 3;
+}
+
+.tile-title-lg {
+  font-size: clamp(12px, 29cqh, 64px);
+  -webkit-line-clamp: 2;
+}
+
+.tile-title-xl {
+  font-size: clamp(12px, 34cqh, 64px);
+  -webkit-line-clamp: 2;
 }
 
 .tile-sm .tile-title {
+  font-size: clamp(12px, 19cqh, 64px);
+  -webkit-line-clamp: 3;
+}
+
+.tile-sm .tile-title-lg {
+  font-size: clamp(12px, 24cqh, 64px);
   -webkit-line-clamp: 2;
-  font-size: 11px;
+}
+
+.tile-sm .tile-title-xl {
+  font-size: clamp(12px, 31cqh, 64px);
+  -webkit-line-clamp: 2;
 }
 
 .tile-sm .tile-countdown {
   display: none;
 }
 
-.tile-md .tile-title {
-  font-size: 14px;
+.tile-wide .tile-title {
+  -webkit-line-clamp: 3;
 }
 
-.tile-wide .tile-title {
-  font-size: 16px;
-  -webkit-line-clamp: 3;
+/* Trailing "+" tile: a quiet surface block. */
+.tile-add {
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+}
+
+.tile-add:hover {
+  color: var(--fg);
+}
+
+.tile-add-glyph {
+  font-size: clamp(22px, 45cqh, 64px);
+  font-weight: 300;
+  line-height: 1;
 }
 
 /* First figure of a tip, ghosted into the right half of md / wide tiles. */
@@ -166,16 +177,16 @@
   mix-blend-mode: multiply;
 }
 
-/* Motion: staggered entry, press flash. */
+/* Metro entrance: slide in from the right while fading, staggered. */
 .tile-enter {
   animation: tile-enter var(--enter-ms) var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 32ms);
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 
 @keyframes tile-enter {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateX(28px);
   }
   to {
     opacity: 1;
@@ -183,21 +194,16 @@
   }
 }
 
+/* Release after a click: spring back from the tilt, then the board flips. */
 .tile-pressed {
-  animation: tile-press var(--press-ms) var(--ease-out) both;
+  animation: tile-release var(--press-ms) var(--ease-out) both;
 }
 
-@keyframes tile-press {
-  0% {
-    transform: scale(1);
-    box-shadow: inset 0 0 0 999px transparent;
+@keyframes tile-release {
+  from {
+    transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--press-scale));
   }
-  35% {
-    transform: scale(var(--press-scale));
-    box-shadow: inset 0 0 0 999px var(--flash);
-  }
-  100% {
-    transform: scale(1);
-    box-shadow: inset 0 0 0 999px transparent;
+  to {
+    transform: none;
   }
 }

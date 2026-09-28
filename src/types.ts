@@ -12,7 +12,7 @@ export type Priority = 'low' | 'normal' | 'high';
 export type Status = 'open' | 'done';
 export type Urgency = 'none' | 'later' | 'soon' | 'critical' | 'overdue';
 export type Dock = 'left' | 'right' | 'free';
-export type Theme = 'dark' | 'light';
+export type Theme = 'dark' | 'light' | 'nerv' | 'cobalt' | 'paper';
 export type Language = 'en' | 'zh';
 
 export interface Paper {
@@ -84,6 +84,8 @@ export interface Settings {
   weather_location: string;
   /** Show the clock / date / weather panel above the board. */
   show_panel: boolean;
+  /** Command for "Edit locally" (e.g. `code`); blank = system default app. */
+  editor_command: string;
 }
 
 /** Current conditions, fetched by the backend from Open-Meteo. */
@@ -127,6 +129,10 @@ export interface Commands {
   mark_done: (args: { id: string }) => BoardState;
   reopen: (args: { id: string }) => BoardState;
   snooze: (args: { id: string; minutes: number }) => BoardState;
+  /** Remove the tip's file from the repository. Irreversible except through git history. */
+  delete_tip: (args: { id: string }) => BoardState;
+  /** Write the tip to the local edit folder, open it in the editor, and push every save. Returns the path. */
+  edit_local: (args: { id: string }) => string;
   /** Quick-capture line, see `core/capture.rs` for the syntax. */
   create_tip: (args: { text: string }) => BoardState;
   save_settings: (args: { settings: Settings }) => BoardState;

@@ -58,7 +58,6 @@ export function renderChrome(options: ChromeOptions): HTMLElement {
     { className: 'chrome', 'data-tauri-drag-region': true, title: syncTitle(state, sync) },
     dot,
     el('span', { className: 'chrome-title', 'data-tauri-drag-region': true, text: BRAND }),
-    el('span', { className: 'chrome-hatch', 'data-tauri-drag-region': true, 'aria-hidden': 'true' }),
   );
   strip.addEventListener('contextmenu', (event) => {
     event.preventDefault();

@@ -12,7 +12,6 @@
   gap: 6px;
   padding: 0 var(--pad);
   background: var(--bg);
-  border-bottom: 1px solid var(--accent-dim);
   cursor: grab;
 }
 
@@ -21,21 +20,11 @@
 }
 
 .chrome-title {
-  font-family: var(--font-display);
   font-size: 10px;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--fg-muted);
   font-weight: var(--weight-body);
-}
-
-/* NERV caution hatch, right end of the strip. */
-.chrome-hatch {
-  margin-left: auto;
-  width: 28px;
-  height: 6px;
-  background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 7px);
-  opacity: 0.55;
 }
 
 .sync-dot {
@@ -95,6 +84,7 @@
   }
 }
 
+/* Flat Metro flyout: slides down a few pixels while fading in. */
 .menu {
   position: fixed;
   z-index: 100;
@@ -104,19 +94,17 @@
   min-width: 140px;
   background: var(--surface-2);
   color: var(--fg);
-  border-left: 2px solid var(--accent);
-  animation: menu-in 120ms var(--ease-out);
-  transform-origin: top left;
+  animation: menu-in 160ms var(--ease-out);
 }
 
 @keyframes menu-in {
   from {
     opacity: 0;
-    transform: scale(0.96);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: none;
   }
 }
 
@@ -124,8 +112,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px 6px 8px;
-  font-size: 12px;
+  padding: 7px 14px 7px 8px;
+  font-size: clamp(13px, 4.2vw, 16px);
   cursor: pointer;
 }
 
@@ -139,5 +127,4 @@
   display: inline-block;
   width: 10px;
   font-size: 10px;
-  color: var(--accent);
 }

@@ -1,4 +1,4 @@
-/* Clock / date / weather panel between the strip and the board. */
+/* Clock / date / weather block between the strip and the board: one flat surface tile. */
 .panel {
   flex: 0 0 auto;
   min-height: var(--panel-h);
@@ -6,9 +6,9 @@
   align-items: stretch;
   justify-content: space-between;
   gap: 8px;
+  margin: 0 var(--pad);
   padding: 5px var(--pad) 6px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--accent-dim);
+  background: var(--surface);
   cursor: grab;
 }
 
@@ -37,19 +37,22 @@
   display: flex;
   align-items: baseline;
   gap: 3px;
-  font-family: var(--font-display);
+  font-family: var(--font-title);
+  font-weight: var(--weight-title);
   font-variant-numeric: tabular-nums;
-  color: var(--accent);
+  color: var(--fg);
   line-height: 1;
 }
 
 .panel-hm {
-  font-size: 24px;
-  letter-spacing: 0.04em;
+  font-size: clamp(24px, 9vw, 44px);
+  letter-spacing: 0.02em;
 }
 
 .panel-sec {
-  font-size: 11px;
+  font-family: var(--font);
+  font-weight: var(--weight-body);
+  font-size: clamp(11px, 3.6vw, 15px);
   color: var(--fg-muted);
   letter-spacing: 0.1em;
 }
@@ -61,9 +64,8 @@
 
 .panel-date,
 .panel-weather-detail {
-  font-family: var(--font-display);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: clamp(10px, 3.4vw, 13px);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--fg-muted);
   white-space: nowrap;
@@ -75,27 +77,28 @@
   display: flex;
   align-items: baseline;
   gap: 5px;
-  font-family: var(--font-display);
   line-height: 1;
   white-space: nowrap;
 }
 
 .panel-glyph {
-  font-size: 15px;
+  font-size: clamp(15px, 5.5vw, 24px);
   color: var(--fg);
 }
 
 .panel-temp {
-  font-size: 22px;
+  font-family: var(--font-title);
+  font-weight: var(--weight-title);
+  font-size: clamp(22px, 8vw, 38px);
   font-variant-numeric: tabular-nums;
   color: var(--fg);
 }
 
 .panel-place {
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: clamp(10px, 3.4vw, 13px);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--fg-muted);
   max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -109,7 +112,6 @@
   color: var(--error);
 }
 
-/* Weather column collapses to a single line when off. */
 .panel[data-weather='off'] .panel-now {
   display: none;
 }

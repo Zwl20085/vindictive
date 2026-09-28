@@ -26,12 +26,13 @@ export const SAMPLE_SETTINGS: Settings = {
   always_on_top: true,
   autostart: false,
   notify_new_tips: true,
-  theme: query.get('theme') === 'light' ? 'light' : 'dark',
+  theme: (['dark', 'light', 'nerv', 'cobalt', 'paper'] as const).find((x) => x === query.get('theme')) ?? 'dark',
   columns: 4,
   show_done: false,
   language: query.get('lang') === 'zh' ? 'zh' : 'en',
   weather_location: query.get('weather') ?? 'Tokyo',
   show_panel: query.get('panel') !== '0',
+  editor_command: 'code',
 };
 
 /** Realistic researcher sample data for browser development. */

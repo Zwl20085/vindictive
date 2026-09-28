@@ -5,15 +5,14 @@
   padding: 10px var(--pad) 12px;
   min-height: 100%;
   background: var(--bg);
+  animation: detail-in 300ms var(--ease-out);
 }
 
 .set-title {
   margin: 0 0 4px;
-  font-family: var(--font-display);
-  font-size: 18px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-family: var(--font-title);
   font-weight: var(--weight-title);
+  font-size: clamp(20px, 7.5vw, 38px);
 }
 
 .set-group {
@@ -21,19 +20,17 @@
   flex-direction: column;
   gap: 8px;
   margin: 0;
-  padding: 8px 0 0;
+  padding: 6px 0 0;
   border: 0;
-  border-top: 1px solid var(--accent-dim);
   min-width: 0;
 }
 
 .set-group-title {
-  padding: 0 4px 0 0;
-  font-family: var(--font-display);
+  padding: 0;
   font-size: 10px;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--fg-muted);
 }
 
 .set-field {
@@ -43,13 +40,13 @@
 }
 
 .set-label {
-  font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--fg-muted);
 }
 
+/* Metro text boxes: flat fill, accent underline on focus. */
 .settings input[type='text'],
 .settings input[type='number'],
 .settings input[type='password'],
@@ -57,7 +54,7 @@
   width: 100%;
   padding: 6px 8px;
   border: 0;
-  border-bottom: 1px solid transparent;
+  border-bottom: 2px solid transparent;
   background: var(--surface-2);
   color: var(--fg);
   transition: border-color var(--press-ms) ease;
@@ -73,7 +70,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: clamp(13px, 4.2vw, 16px);
 }
 
 .set-check input {
@@ -89,7 +86,6 @@
   gap: 6px;
   padding: 8px;
   background: var(--surface);
-  border-left: 2px solid var(--accent-dim);
 }
 
 .set-row {
@@ -104,7 +100,6 @@
   padding: 4px;
   margin: 0 calc(-1 * var(--pad));
   background: var(--surface);
-  border-top: 1px solid var(--accent-dim);
 }
 
 .set-status {

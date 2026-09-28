@@ -1,15 +1,17 @@
 /* Design tokens — docs/DESIGN.md */
 :root {
+  /* Metro: Segoe for everything that is read as UI. CJK falls through to YaHei / PingFang. */
   --font: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC',
     system-ui, -apple-system, sans-serif;
-  /* Condensed DIN-like face for labels, clock and the NEXT chip. Ships with Windows 10+. */
-  --font-display: 'Bahnschrift SemiCondensed', 'Bahnschrift', 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI',
-    'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  /* Evangelion title-card typography: a heavy Mincho-like serif for titles and the clock. */
+  --font-title: 'Sitka Display', 'Sitka Heading', Georgia, 'Times New Roman', 'Yu Mincho', 'MS Mincho', 'SimSun',
+    'Songti SC', 'Noto Serif SC', serif;
   --font-mono: 'Cascadia Mono', Consolas, 'Segoe UI Mono', ui-monospace, monospace;
-  --weight-title: 300;
+  --weight-title: 700;
   --weight-body: 400;
   --weight-strong: 600;
 
+  /* Minimum tile unit; the board scales it up to fill the window width. */
   --unit: 64px;
   --gap: 6px;
   --pad: 8px;
@@ -17,44 +19,78 @@
   --panel-h: 52px;
   --radius: 0;
 
-  /* NERV dark: near-black with a violet bias, warm off-white text, one orange accent. */
-  --bg: #0c0b10;
-  --fg: #e6e1d8;
-  --fg-muted: #8a857d;
-  --surface: #15141a;
-  --surface-2: #1f1e26;
-  --accent: #e0762b;
-  --accent-ink: #0c0b10;
-  --accent-dim: rgb(224 118 43 / 0.35);
-  --edge: var(--accent);
+  /* Dark Metro ground, warm off-white text, white edge. */
+  --bg: #111113;
+  --fg: #e8e6e1;
+  --fg-muted: #8f8d88;
+  --surface: #1a1a1d;
+  --surface-2: #26262a;
+  --edge: #ffffff;
+  --accent: #3c7dd9;
   --error: #b8372f;
-  --ok: #6fa34a;
+  --ok: #4f9a3e;
   --warn: #c9962b;
-  --scanline: rgb(255 255 255 / 0.028);
-  --flash: rgb(255 255 255 / 0.22);
-  --overlay: rgb(12 11 16 / 0.94);
+  --overlay: rgb(17 17 19 / 0.94);
 
-  --flip-ms: 260ms;
+  --flip-ms: 240ms;
   --press-ms: 160ms;
-  --enter-ms: 380ms;
-  --press-scale: 0.96;
-  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --enter-ms: 360ms;
+  --tilt-deg: 9deg;
+  --press-scale: 0.97;
+  /* Metro's exponential ease-out. */
+  --ease-out: cubic-bezier(0.1, 0.9, 0.2, 1);
 
   color-scheme: dark;
 }
 
+/* NERV: near-black with a violet bias and an orange edge. */
+:root[data-theme='nerv'] {
+  --bg: #0b0a0e;
+  --fg: #e6e1d8;
+  --fg-muted: #8a857d;
+  --surface: #15141a;
+  --surface-2: #1f1e26;
+  --edge: #e0762b;
+  --accent: #e0762b;
+  --overlay: rgb(11 10 14 / 0.94);
+  color-scheme: dark;
+}
+
+/* Cobalt: deep blue ground, white edge. */
+:root[data-theme='cobalt'] {
+  --bg: #0f1a2e;
+  --fg: #e4eaf4;
+  --fg-muted: #8a97ad;
+  --surface: #16233b;
+  --surface-2: #1f2f4d;
+  --edge: #ffffff;
+  --accent: #4c8dff;
+  --overlay: rgb(15 26 46 / 0.94);
+  color-scheme: dark;
+}
+
+/* Paper: warm off-white, for bright rooms. */
+:root[data-theme='paper'] {
+  --bg: #f5f0e6;
+  --fg: #2a2520;
+  --fg-muted: #7a7168;
+  --surface: #fbf8f1;
+  --surface-2: #e8e1d3;
+  --edge: #ffffff;
+  --accent: #b0562a;
+  --overlay: rgb(245 240 230 / 0.94);
+  color-scheme: light;
+}
+
 :root[data-theme='light'] {
-  --bg: #ece8e0;
-  --fg: #1c1a1f;
-  --fg-muted: #6a665f;
-  --surface: #f6f3ec;
-  --surface-2: #dfd9cd;
-  --accent: #c8611c;
-  --accent-ink: #f6f3ec;
-  --accent-dim: rgb(200 97 28 / 0.35);
-  --scanline: rgb(0 0 0 / 0.03);
-  --flash: rgb(255 255 255 / 0.3);
-  --overlay: rgb(236 232 224 / 0.94);
+  --bg: #f0efec;
+  --fg: #1c1c1e;
+  --fg-muted: #6a6966;
+  --surface: #ffffff;
+  --surface-2: #e2e1dd;
+  --edge: #ffffff;
+  --accent: #2b6cc4;
+  --overlay: rgb(240 239 236 / 0.94);
   color-scheme: light;
 }
 
@@ -75,7 +111,7 @@ body {
   color: var(--fg);
   font-family: var(--font);
   font-weight: var(--weight-body);
-  font-size: 13px;
+  font-size: clamp(13px, 4.4vw, 17px);
   line-height: 1.35;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -112,14 +148,9 @@ select:focus-visible {
   padding: 0;
   color: var(--fg);
   text-decoration: underline;
-  text-decoration-color: var(--accent-dim);
   text-underline-offset: 2px;
   text-align: left;
   word-break: break-all;
-}
-
-.link-button:hover {
-  text-decoration-color: var(--accent);
 }
 
 .action {
@@ -127,14 +158,11 @@ select:focus-visible {
   border: 0;
   padding: 6px 8px;
   color: var(--fg);
-  font-family: var(--font-display);
   font-weight: var(--weight-body);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 11px;
-  transition:
-    transform var(--press-ms) var(--ease-out),
-    background-color var(--press-ms) ease;
+  letter-spacing: 0.06em;
+  font-size: clamp(11px, 3.6vw, 14px);
+  transition: transform var(--press-ms) var(--ease-out);
 }
 
 .action:hover {
@@ -152,12 +180,16 @@ select:focus-visible {
 
 .action-primary {
   font-weight: var(--weight-strong);
-  color: var(--accent);
 }
 
 .action-back {
   margin-left: auto;
   color: var(--fg-muted);
+}
+
+.action-danger {
+  color: var(--error);
+  font-weight: var(--weight-strong);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -49,9 +49,9 @@ The two screenshots above are the real board rendered with sample tips (left:
 the grid, right: a tile flipped open). The hero image at the top and the
 annotated tile are design renders. The board is a 290 px wide strip that docks
 to a screen edge. Everything is flat: one solid colour per tile, zero radius,
-no shadows. The styling is NERV-issue: near-black ground, one orange accent,
-corner brackets on every tile, a clock / date / weather panel on top, and the
-whole UI in English or 简体中文.
+no shadows. Titles are set in a heavy serif (an Evangelion title-card nod);
+everything else is plain Metro. Tiles and type scale with the window, a clock /
+date / weather panel sits on top, and the whole UI is in English or 简体中文.
 
 | Kind / state | Colour |
 | ------------ | ------ |

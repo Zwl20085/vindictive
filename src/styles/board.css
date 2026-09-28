@@ -5,16 +5,6 @@
   perspective: 1400px;
 }
 
-/* Faint CRT scanlines over the whole stage, both faces. */
-.stage::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  background: repeating-linear-gradient(0deg, var(--scanline) 0 1px, transparent 1px 3px);
-}
-
 .face {
   position: absolute;
   inset: 0;
@@ -42,35 +32,9 @@
   transform: rotateY(0deg);
 }
 
-/* One orange scan sweep down the back face each time it opens. */
-.face-back::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: linear-gradient(to bottom, transparent, var(--accent));
-  opacity: 0;
-  pointer-events: none;
-}
-
-.stage.open .face-back::after {
-  animation: scan var(--flip-ms) linear calc(var(--flip-ms) * 0.6) 1;
-}
-
-@keyframes scan {
-  0% {
-    opacity: 0.9;
-    transform: translateY(0);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(600px);
-  }
-}
-
+/* Tiles fill the window: unit = (width - padding - gaps) / columns, never below 64 px. */
 .board {
+  --unit: max(64px, calc((100vw - 2 * var(--pad) - (var(--cols, 4) - 1) * var(--gap)) / var(--cols, 4)));
   display: grid;
   grid-template-columns: repeat(var(--cols, 4), var(--unit));
   grid-auto-rows: var(--unit);
@@ -85,8 +49,62 @@
   margin: 0;
   padding: var(--pad);
   color: var(--fg-muted);
+  font-weight: 300;
+  font-size: clamp(13px, 4.4vw, 17px);
+}
+
+/* Inline "new tip" bar above the grid. */
+.addbar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--pad) var(--pad) 0;
+  padding: 6px 8px;
+  background: var(--surface);
+  animation: menu-in 160ms var(--ease-out);
+}
+
+.addbar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.addbar-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-title);
   font-weight: var(--weight-title);
-  font-size: 13px;
+  font-size: clamp(15px, 5vw, 22px);
+  padding: 2px 0;
+}
+
+.addbar-input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--edge);
+}
+
+.addbar-input::placeholder {
+  color: var(--fg-muted);
+  font-family: var(--font);
+  font-weight: 300;
+}
+
+.addbar-hint {
+  margin: 0;
+  font-size: clamp(10px, 3.4vw, 13px);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.addbar-hint[data-state='error'] {
+  color: var(--error);
 }
 
 /* Figure viewer, above everything. */
@@ -97,7 +115,7 @@
   display: flex;
   flex-direction: column;
   background: var(--overlay);
-  animation: lightbox-in 180ms var(--ease-out);
+  animation: lightbox-in 200ms var(--ease-out);
 }
 
 .lightbox-closing {
@@ -119,7 +137,6 @@
   align-items: center;
   gap: 8px;
   padding: 2px 4px 2px var(--pad);
-  border-top: 1px solid var(--accent-dim);
   background: var(--surface);
 }
 
@@ -137,7 +154,7 @@
 @keyframes lightbox-in {
   from {
     opacity: 0;
-    transform: scale(0.97);
+    transform: scale(0.96);
   }
   to {
     opacity: 1;

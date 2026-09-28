@@ -13,6 +13,9 @@ export interface BoardOptions {
   state: BoardState;
   now: Date;
   onOpen: (id: string) => void;
+  onMenu?: (id: string, x: number, y: number) => void;
+  /** Click on the trailing "+" tile. When absent, no add tile is rendered. */
+  onAdd?: () => void;
   /**
    * Ids already shown on the board. Tiles not in the set play the entry
    * animation and are added to it; pass nothing to animate every tile.
@@ -39,6 +42,17 @@ export function visibleTips(state: BoardState, now: Date): Tip[] {
   });
 }
 
+/** The trailing "+" tile. */
+function addTile(onAdd: () => void): HTMLButtonElement {
+  const button = el(
+    'button',
+    { className: 'tile tile-sm tile-add', type: 'button', 'aria-label': t('addTip'), title: t('addTip') },
+    el('span', { className: 'tile-add-glyph', 'aria-hidden': 'true', text: '+' }),
+  );
+  button.addEventListener('click', onAdd);
+  return button;
+}
+
 function emptyMessage(state: BoardState): HTMLElement {
   const text = state.has_token ? t('emptyWithToken') : t('emptyNoToken');
   return el('p', { className: 'board-empty', text });
@@ -46,14 +60,14 @@ function emptyMessage(state: BoardState): HTMLElement {
 
 /** Render the tile grid into a fresh element. */
 export function renderBoard(options: BoardOptions): HTMLElement {
-  const { state, now, onOpen, seen, resolveImage } = options;
+  const { state, now, onOpen, onMenu, onAdd, seen, resolveImage } = options;
   const columns = clampColumns(state.settings.columns);
   const grid = el('div', { className: 'board', role: 'list' });
   grid.style.setProperty('--cols', String(columns));
 
   const tips = visibleTips(state, now);
   if (tips.length === 0) {
-    mount(grid, emptyMessage(state));
+    mount(grid, emptyMessage(state), onAdd ? addTile(onAdd) : null);
     return grid;
   }
   let entering = 0;
@@ -61,17 +75,36 @@ export function renderBoard(options: BoardOptions): HTMLElement {
     const fresh = !seen || !seen.has(tip.id);
     const enterIndex = fresh ? entering++ : undefined;
     seen?.add(tip.id);
-    return renderTile({ tip, isNextUp: tip.id === state.next_up, now, columns, onOpen, enterIndex, resolveImage });
+    return renderTile({ tip, isNextUp: tip.id === state.next_up, now, columns, onOpen, onMenu, enterIndex, resolveImage });
   });
-  mount(grid, ...tiles);
+  mount(grid, ...tiles, onAdd ? addTile(onAdd) : null);
   return grid;
+}
+
+/** Title size tiers, largest first; see `tile.css`. */
+export const TITLE_TIERS = ['tile-title-xl', 'tile-title-lg'] as const;
+
+/**
+ * Give every title the largest tier that does not overflow its tile. Must run
+ * after the grid is in the document (layout is needed to detect overflow).
+ * A clamped title reports `scrollHeight` larger than `clientHeight`.
+ */
+export function fitTitles(grid: ParentNode): void {
+  for (const title of Array.from(grid.querySelectorAll<HTMLElement>('.tile-title'))) {
+    title.classList.remove(...TITLE_TIERS);
+    for (const tier of TITLE_TIERS) {
+      title.classList.add(tier);
+      if (title.scrollHeight <= title.clientHeight + 1) break;
+      title.classList.remove(tier);
+    }
+  }
 }
 
 /** Arrow-key navigation between tiles. */
 export function handleBoardKeys(grid: HTMLElement, event: KeyboardEvent): void {
   const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'];
   if (!keys.includes(event.key)) return;
-  const tiles = Array.from(grid.querySelectorAll<HTMLButtonElement>('.tile'));
+  const tiles = Array.from(grid.querySelectorAll<HTMLButtonElement>('.tile:not(.tile-add)'));
   const index = tiles.findIndex((t) => t === document.activeElement);
   if (index < 0) {
     tiles[0]?.focus();

@@ -25,6 +25,9 @@ pub enum Theme {
     #[default]
     Dark,
     Light,
+    Nerv,
+    Cobalt,
+    Paper,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -57,6 +60,9 @@ pub struct Settings {
     pub weather_location: String,
     /// Show the clock / date / weather panel above the tiles.
     pub show_panel: bool,
+    /// Command that opens a file for "Edit locally"; blank means the system
+    /// default application for `.md`.
+    pub editor_command: String,
 }
 
 impl Default for Settings {
@@ -78,6 +84,7 @@ impl Default for Settings {
             language: Language::En,
             weather_location: String::new(),
             show_panel: true,
+            editor_command: "code".into(),
         }
     }
 }
@@ -132,6 +139,7 @@ impl Settings {
             .chars()
             .take(MAX_LOCATION_CHARS)
             .collect();
+        s.editor_command = s.editor_command.trim().to_string();
         Ok(s)
     }
 
@@ -229,6 +237,7 @@ mod tests {
         assert_eq!(s.poll_seconds, 60);
         assert_eq!(s.language, Language::En);
         assert!(s.show_panel);
+        assert_eq!(s.editor_command, "code");
         assert!(s.weather_location.is_empty());
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);

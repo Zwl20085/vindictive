@@ -13,10 +13,15 @@ export const SNOOZE_HOUR_MINUTES = 60;
 /** Length of the strike-through played before a tip is marked done. */
 export const DONE_MS = 380;
 
+/** A second click within this window confirms a delete. */
+export const CONFIRM_MS = 4000;
+
 export interface DetailActions {
   onDone: (id: string) => void;
   onReopen: (id: string) => void;
   onSnooze: (id: string, minutes: number) => void;
+  onDelete: (id: string) => void;
+  onEditLocal: (id: string) => void;
   onOpenLink: (url: string) => void;
   onBack: () => void;
   resolveImage: ImageResolver;
@@ -146,13 +151,33 @@ function actionBar(tip: Tip, settings: Settings, now: Date, actions: DetailActio
     tip.status === 'done'
       ? button(t('reopen'), () => actions.onReopen(tip.id), 'action-primary')
       : button(t('done'), done, 'action-primary');
+  // Delete arms on the first click and fires on the second.
+  let armed: ReturnType<typeof setTimeout> | undefined;
+  const del = button(t('delete'), () => {
+    if (armed) {
+      clearTimeout(armed);
+      armed = undefined;
+      panel.querySelectorAll<HTMLButtonElement>('.action').forEach((b) => (b.disabled = true));
+      void animate(panel, 'detail-leaving', DONE_MS).then(() => actions.onDelete(tip.id));
+      return;
+    }
+    del.textContent = t('deleteConfirm');
+    del.classList.add('action-danger');
+    armed = setTimeout(() => {
+      armed = undefined;
+      del.textContent = t('delete');
+      del.classList.remove('action-danger');
+    }, CONFIRM_MS);
+  });
   return el(
     'footer',
     { className: 'detail-actions' },
     primary,
     tip.status === 'open' ? button(t('snooze1h'), () => actions.onSnooze(tip.id, SNOOZE_HOUR_MINUTES)) : null,
     tip.status === 'open' ? button(t('tomorrow'), () => actions.onSnooze(tip.id, minutesUntilTomorrowMorning(now))) : null,
+    button(t('editLocal'), () => actions.onEditLocal(tip.id)),
     button(t('editOnGithub'), () => actions.onOpenLink(editUrl(settings, tip.path))),
+    del,
     button(t('back'), actions.onBack, 'action-back'),
   );
 }

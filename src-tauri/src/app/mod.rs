@@ -3,6 +3,7 @@
 
 pub mod board;
 pub mod commands;
+pub mod editor;
 pub mod notify;
 pub mod scheduler;
 pub mod secrets;

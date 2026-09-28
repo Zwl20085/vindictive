@@ -8,19 +8,18 @@
 
 .capture {
   display: flex;
-  align-items: stretch;
-  gap: 10px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
   height: 100%;
-  padding: 6px 10px 6px 0;
-  border-top: 1px solid var(--accent-dim);
-  border-bottom: 1px solid var(--accent-dim);
-  animation: capture-in 160ms var(--ease-out);
+  padding: 6px 10px;
+  animation: capture-in 200ms var(--ease-out);
 }
 
 @keyframes capture-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
@@ -28,26 +27,14 @@
   }
 }
 
-.capture-mark {
-  flex: 0 0 4px;
-  background: var(--accent);
-}
-
-.capture-fields {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .capture-input {
   width: 100%;
   border: 0;
   background: transparent;
   color: var(--fg);
-  font-size: 16px;
+  font-family: var(--font-title);
   font-weight: var(--weight-title);
+  font-size: 17px;
   padding: 2px 0;
 }
 
@@ -58,11 +45,12 @@
 
 .capture-input::placeholder {
   color: var(--fg-muted);
+  font-family: var(--font);
+  font-weight: 300;
 }
 
 .capture-hint {
   margin: 0;
-  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--fg-muted);
   white-space: nowrap;
