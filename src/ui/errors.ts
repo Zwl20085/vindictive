@@ -12,12 +12,23 @@ export function errorLine(): HTMLElement {
   return line;
 }
 
+/** A neutral, non-error message on the same line (e.g. "Opened <path>"). */
+export function showNotice(context: string, message: string): void {
+  void call('frontend_log', { level: 'info', message: `${context}: ${message}` }).catch(() => undefined);
+  const node = errorLine();
+  node.textContent = `${context}: ${message}`;
+  node.classList.add('visible', 'notice');
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => node.classList.remove('visible', 'notice'), ERROR_VISIBLE_MS);
+}
+
 export function showError(context: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`Vindictive: ${context}`, error);
   void call('frontend_log', { level: 'error', message: `${context}: ${message}` }).catch(() => undefined);
   const node = errorLine();
   node.textContent = `${context}: ${message}`;
+  node.classList.remove('notice');
   node.classList.add('visible');
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => node.classList.remove('visible'), ERROR_VISIBLE_MS);

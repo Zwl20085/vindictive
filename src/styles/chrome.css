@@ -86,6 +86,11 @@
   animation: error-in 200ms var(--ease-out);
 }
 
+.error-line.notice {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
 @keyframes error-in {
   from {
     transform: translateY(-100%);

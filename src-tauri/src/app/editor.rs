@@ -90,6 +90,24 @@ pub fn open(app: &AppHandle, state: &AppState, id: &str) -> Result<PathBuf, Stri
     Ok(path)
 }
 
+/// Well-known VS Code executables, for when `code` is not on the PATH the
+/// app inherited (common when launched from a shortcut or another shell).
+fn known_editor(command: &str) -> Option<PathBuf> {
+    if !command.eq_ignore_ascii_case("code") {
+        return None;
+    }
+    let mut candidates = Vec::new();
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local).join("Programs/Microsoft VS Code/Code.exe"));
+    }
+    for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(pf) = std::env::var(var) {
+            candidates.push(PathBuf::from(pf).join("Microsoft VS Code/Code.exe"));
+        }
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
 /// Run the configured editor command with the file, falling back to the
 /// system default application for `.md` files.
 fn launch(command: &str, path: &Path) -> Result<(), String> {
@@ -97,10 +115,15 @@ fn launch(command: &str, path: &Path) -> Result<(), String> {
     if !command.is_empty() {
         match spawn_editor(command, path) {
             Ok(()) => return Ok(()),
-            Err(e) => {
-                log::warn!("editor {command:?} failed ({e}); falling back to the default app")
+            Err(e) => log::warn!("editor {command:?} failed ({e})"),
+        }
+        if let Some(exe) = known_editor(command) {
+            match Command::new(&exe).arg(path).spawn() {
+                Ok(_) => return Ok(()),
+                Err(e) => log::warn!("{} failed ({e})", exe.display()),
             }
         }
+        log::warn!("falling back to the default app for {}", path.display());
     }
     tauri_plugin_opener::open_path(path, None::<&str>)
         .map_err(|e| format!("cannot open {}: {e}", path.display()))

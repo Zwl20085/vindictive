@@ -11,7 +11,7 @@ import { fitTitles, handleBoardKeys, renderBoard } from './board';
 import { renderChrome } from './chrome';
 import { renderDetail } from './detail';
 import { el, mount } from './dom';
-import { errorLine, guard, showError } from './errors';
+import { errorLine, guard, showError, showNotice } from './errors';
 import { cachedResolver } from './images';
 import { closeLightbox, isLightboxOpen } from './lightbox';
 import { Panel } from './panel';
@@ -285,7 +285,7 @@ export class App {
       onSetSize: (id: string, size: TileSize | null) => void this.mutate(() => call('set_size', { id, size }), 'set_size'),
       onEditLocal: (id: string) =>
         void guard('edit_local', () => call('edit_local', { id })).then((path) => {
-          if (path) showError(t('openedIn'), path);
+          if (path) showNotice(t('openedIn'), path);
         }),
       onOpenLink: (url: string) => void guard('open link', () => openExternal(url)),
       onBack: () => this.back_(),
