@@ -1,0 +1,46 @@
+[package]
+name = "vindictive"
+version = "0.1.0"
+description = "Always-on-top tile board of what to do next, synced with GitHub."
+authors = ["Wentao Zhang"]
+license = "MIT"
+repository = "https://github.com/Zwl20085/vindictive"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "vindictive_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-log = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+chrono = { version = "0.4", features = ["serde"] }
+keyring = { version = "3", features = ["windows-native"] }
+base64 = "0.22"
+thiserror = "2"
+roxmltree = "0.20"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

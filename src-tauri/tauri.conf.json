@@ -1,0 +1,70 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Vindictive",
+  "version": "0.1.0",
+  "identifier": "dev.zhangwentao.vindictive",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Vindictive",
+        "url": "index.html",
+        "width": 290,
+        "height": 620,
+        "minWidth": 160,
+        "minHeight": 200,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": true,
+        "transparent": false,
+        "shadow": false,
+        "visible": true
+      },
+      {
+        "label": "capture",
+        "title": "Quick capture",
+        "url": "capture.html",
+        "width": 480,
+        "height": 96,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "center": true,
+        "shadow": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; base-uri 'self'; object-src 'none'; form-action 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "publisher": "Wentao Zhang",
+    "shortDescription": "Always-on-top tile board of what to do next, synced with GitHub.",
+    "longDescription": "Vindictive shows your research to-dos as Windows 8 style live tiles that stay on top of every window, raises native toasts at remind times, and keeps every tip as a Markdown file in your own GitHub repository.",
+    "category": "Productivity",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {}
+}

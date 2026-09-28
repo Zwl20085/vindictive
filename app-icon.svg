@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Vindictive</title>
+  <!-- 2x2 mosaic, 40px gutters; the red tile is nudged up-left to read as "next" -->
+  <rect x="64" y="64" width="428" height="428" fill="#2D89EF"/>
+  <rect x="532" y="64" width="428" height="428" fill="#00ABA9"/>
+  <rect x="64" y="532" width="428" height="428" fill="#DA532C"/>
+  <rect x="500" y="500" width="460" height="460" fill="#EE1111"/>
+  <rect x="500" y="500" width="24" height="460" fill="#FFFFFF"/>
+</svg>

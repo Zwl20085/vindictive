@@ -1,0 +1,81 @@
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px var(--pad) 12px;
+  min-height: 100%;
+  background: var(--bg);
+}
+
+.set-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: var(--weight-title);
+}
+
+.set-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.set-label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.settings input[type='text'],
+.settings input[type='number'],
+.settings input[type='password'],
+.settings select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.set-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.set-check input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #2d89ef;
+}
+
+.set-token {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--surface);
+}
+
+.set-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.set-status {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.set-status[data-state='ok'] {
+  color: var(--ok);
+}
+
+.set-status[data-state='error'] {
+  color: var(--error);
+}

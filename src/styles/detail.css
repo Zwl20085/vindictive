@@ -1,0 +1,154 @@
+.detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--bg);
+  user-select: text;
+}
+
+.detail-header {
+  background: var(--tile-bg);
+  color: var(--tile-fg);
+  padding: 10px var(--pad) 12px;
+}
+
+.detail-kind {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.detail-title {
+  margin: 6px 0 4px;
+  font-size: 18px;
+  line-height: 1.2;
+  font-weight: var(--weight-title);
+  word-break: break-word;
+}
+
+.detail-sub {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.92;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-meta {
+  list-style: none;
+  margin: 0;
+  padding: 8px var(--pad) 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.detail-meta-row {
+  display: flex;
+  gap: 8px;
+}
+
+.detail-meta-key {
+  flex: 0 0 48px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  line-height: 1.6;
+}
+
+.detail-paper {
+  margin: 8px var(--pad) 0;
+  padding: 8px;
+  background: var(--surface);
+}
+
+.detail-paper-title {
+  margin: 0 0 4px;
+  font-weight: var(--weight-strong);
+  font-size: 12px;
+}
+
+.detail-paper-meta {
+  margin: 0 0 4px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.detail-paper-ref {
+  font-size: 11px;
+}
+
+.detail-body {
+  padding: 8px var(--pad);
+  font-size: 12px;
+  flex: 1 1 auto;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-weight: var(--weight-title);
+  margin: 10px 0 4px;
+  font-size: 14px;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol {
+  margin: 4px 0;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 18px;
+}
+
+.markdown li {
+  margin: 2px 0;
+}
+
+.markdown img {
+  display: block;
+  max-width: 100%;
+  margin: 6px 0;
+}
+
+.markdown img[data-error]::after {
+  content: attr(alt);
+}
+
+.markdown code {
+  background: var(--surface-2);
+  padding: 0 3px;
+  font-size: 11px;
+}
+
+.markdown a {
+  color: var(--fg);
+}
+
+.detail-links {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--pad) 8px;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px;
+  background: var(--surface);
+}

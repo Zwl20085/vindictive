@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, Helvetica, Arial, sans-serif">
+  <title>Vindictive — an always-on-top tile board that tells you what to do next</title>
+  <!-- desktop background -->
+  <rect width="1200" height="630" fill="#0B0C0E"/>
+  <rect x="0" y="0" width="1200" height="630" fill="#111214" opacity="0.6"/>
+
+  <!-- wordmark -->
+  <text x="80" y="200" fill="#FFFFFF" font-size="88" font-weight="300" letter-spacing="-2">Vindictive</text>
+  <text x="84" y="252" fill="#C9CBD1" font-size="24" font-weight="300">An always-on-top tile board that tells you what to do next.</text>
+  <text x="84" y="288" fill="#C9CBD1" font-size="24" font-weight="300">Synced with GitHub.</text>
+
+  <!-- feature ticks -->
+  <g fill="#8A8D95" font-size="17" font-weight="400">
+    <rect x="84" y="352" width="8" height="8" fill="#2D89EF"/><text x="104" y="361">Markdown tips in your own private repo</text>
+    <rect x="84" y="388" width="8" height="8" fill="#EE1111"/><text x="104" y="397">Deadline countdown, colour escalation</text>
+    <rect x="84" y="424" width="8" height="8" fill="#00ABA9"/><text x="104" y="433">Native Windows toasts at remind times</text>
+    <rect x="84" y="460" width="8" height="8" fill="#DA532C"/><text x="104" y="469">Quick capture: Ctrl+Shift+Space</text>
+  </g>
+
+  <!-- board window: 4 columns x 64px + 3 gaps x 6px = 274px + 16px padding = 290 wide -->
+  <g transform="translate(830 60)">
+    <rect x="0" y="0" width="290" height="510" fill="#111214"/>
+    <!-- top strip -->
+    <rect x="0" y="0" width="290" height="20" fill="#111214"/>
+    <circle cx="12" cy="10" r="3" fill="#00A300"/>
+    <text x="24" y="14" fill="#6F727A" font-size="10" font-weight="400">synced 09:41</text>
+
+    <!-- grid origin -->
+    <g transform="translate(8 28)">
+      <!-- NEXT tile: wide 4x2 = 274 x 134, critical red -->
+      <rect x="0" y="0" width="274" height="134" fill="#EE1111"/>
+      <rect x="0" y="0" width="2" height="134" fill="#FFFFFF"/>
+      <text x="12" y="20" fill="#FFFFFF" font-size="11" font-weight="600" letter-spacing="1">NEXT</text>
+      <text x="52" y="20" fill="#FFFFFF" font-size="11" font-weight="400" opacity="0.9">3d 6h</text>
+      <text x="262" y="21" fill="#FFFFFF" font-size="12" text-anchor="end" opacity="0.9">▲</text>
+      <text x="12" y="102" fill="#FFFFFF" font-size="24" font-weight="300">IEMDC abstract</text>
+      <text x="12" y="124" fill="#FFFFFF" font-size="13" font-weight="300" opacity="0.85">Submit before 23:59 · Lab 302</text>
+
+      <!-- row 2: Group meeting md 2x2 (134x134) teal at (0,140) -->
+      <rect x="0" y="140" width="134" height="134" fill="#00ABA9"/>
+      <text x="8" y="158" fill="#FFFFFF" font-size="10" font-weight="400" opacity="0.9">Mon 10:00</text>
+      <text x="126" y="159" fill="#FFFFFF" font-size="11" text-anchor="end" opacity="0.9">◷</text>
+      <text x="8" y="246" fill="#FFFFFF" font-size="18" font-weight="300">Group</text>
+      <text x="8" y="266" fill="#FFFFFF" font-size="18" font-weight="300">meeting</text>
+
+      <!-- ECCE camera-ready md 2x2 yellow at (140,140), dark text -->
+      <rect x="140" y="140" width="134" height="134" fill="#FFC40D"/>
+      <text x="148" y="158" fill="#1D1D1D" font-size="10" font-weight="400">6d</text>
+      <text x="266" y="159" fill="#1D1D1D" font-size="11" text-anchor="end">▲</text>
+      <text x="148" y="246" fill="#1D1D1D" font-size="18" font-weight="300">ECCE</text>
+      <text x="148" y="266" fill="#1D1D1D" font-size="18" font-weight="300">camera-ready</text>
+
+      <!-- row 3: reading wide 4x2 orange at (0,280) height 134 -->
+      <rect x="0" y="280" width="274" height="134" fill="#DA532C"/>
+      <text x="12" y="298" fill="#FFFFFF" font-size="10" font-weight="400" opacity="0.9">arXiv 2401.12345</text>
+      <text x="262" y="299" fill="#FFFFFF" font-size="11" text-anchor="end" opacity="0.9">▤</text>
+      <text x="12" y="376" fill="#FFFFFF" font-size="18" font-weight="300">Thermal model of</text>
+      <text x="12" y="398" fill="#FFFFFF" font-size="18" font-weight="300">hairpin windings</text>
+
+      <!-- row 4: small tiles 64x64 at y=420 -->
+      <rect x="0" y="420" width="134" height="64" fill="#2D89EF"/>
+      <text x="8" y="436" fill="#FFFFFF" font-size="9" font-weight="400" opacity="0.9">Lab 302</text>
+      <text x="8" y="474" fill="#FFFFFF" font-size="13" font-weight="300">check coil temp</text>
+
+      <rect x="140" y="420" width="64" height="64" fill="#7E3878"/>
+      <text x="146" y="436" fill="#FFFFFF" font-size="9" font-weight="400" opacity="0.9">✎</text>
+      <text x="146" y="474" fill="#FFFFFF" font-size="12" font-weight="300">Backup NAS</text>
+
+      <rect x="210" y="420" width="64" height="64" fill="#1E7145"/>
+      <text x="216" y="436" fill="#FFFFFF" font-size="9" font-weight="400" opacity="0.9">3w</text>
+      <text x="216" y="462" fill="#FFFFFF" font-size="12" font-weight="300">Renew</text>
+      <text x="216" y="476" fill="#FFFFFF" font-size="12" font-weight="300">ethics</text>
+    </g>
+  </g>
+
+  <!-- toast in the bottom-right corner of the "desktop" -->
+  <g transform="translate(470 500)">
+    <rect x="0" y="0" width="330" height="86" fill="#1F2023"/>
+    <rect x="0" y="0" width="4" height="86" fill="#EE1111"/>
+    <text x="18" y="26" fill="#FFFFFF" font-size="14" font-weight="600">Vindictive</text>
+    <text x="18" y="50" fill="#FFFFFF" font-size="14" font-weight="400">IEMDC abstract is due in 3 days</text>
+    <text x="18" y="72" fill="#9A9DA5" font-size="12" font-weight="400">Submit before 23:59 · Lab 302</text>
+  </g>
+</svg>

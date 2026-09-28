@@ -1,0 +1,58 @@
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  perspective: 1400px;
+}
+
+.face {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  backface-visibility: hidden;
+  transition: transform var(--flip-ms) ease-in-out;
+  background: var(--bg);
+}
+
+.face-front {
+  transform: rotateY(0deg);
+}
+
+.face-back {
+  transform: rotateY(180deg);
+}
+
+.stage.open .face-front {
+  transform: rotateY(-180deg);
+  pointer-events: none;
+}
+
+.stage.open .face-back {
+  transform: rotateY(0deg);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 4), var(--unit));
+  grid-auto-rows: var(--unit);
+  grid-auto-flow: dense;
+  gap: var(--gap);
+  padding: var(--pad);
+  justify-content: start;
+}
+
+.board-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--pad);
+  color: var(--fg-muted);
+  font-weight: var(--weight-title);
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .face {
+    transition: none;
+  }
+}

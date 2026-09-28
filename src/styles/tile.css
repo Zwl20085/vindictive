@@ -1,0 +1,90 @@
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 5px 6px;
+  border: 0;
+  background: var(--tile-bg);
+  color: var(--tile-fg);
+  text-align: left;
+  overflow: hidden;
+  transition: transform var(--press-ms) ease;
+}
+
+.tile:active {
+  transform: scale(var(--press-scale));
+}
+
+.tile:hover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgb(255 255 255 / 0.06);
+  pointer-events: none;
+}
+
+.tile-is-next {
+  box-shadow: inset 2px 0 0 var(--edge);
+}
+
+.tile-overdue {
+  box-shadow: inset 0 1px 0 var(--edge);
+}
+
+.tile-is-next.tile-overdue {
+  box-shadow: inset 2px 0 0 var(--edge), inset 0 1px 0 var(--edge);
+}
+
+.tile-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  opacity: 0.92;
+}
+
+.tile-next {
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.14em;
+}
+
+.tile-countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+.tile-glyph {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.tile-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-weight: var(--weight-title);
+  font-size: 12px;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.tile-sm .tile-title {
+  -webkit-line-clamp: 2;
+  font-size: 11px;
+}
+
+.tile-sm .tile-countdown {
+  display: none;
+}
+
+.tile-md .tile-title {
+  font-size: 14px;
+}
+
+.tile-wide .tile-title {
+  font-size: 16px;
+  -webkit-line-clamp: 3;
+}

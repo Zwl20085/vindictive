@@ -1,0 +1,96 @@
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.chrome {
+  height: var(--chrome-h);
+  flex: 0 0 var(--chrome-h);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--pad);
+  background: var(--bg);
+  cursor: grab;
+}
+
+.chrome:active {
+  cursor: grabbing;
+}
+
+.chrome-title {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  font-weight: var(--weight-body);
+}
+
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--fg-muted);
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.sync-dot[data-state='ok'] {
+  background: var(--ok);
+}
+
+.sync-dot[data-state='syncing'] {
+  background: var(--warn);
+}
+
+.sync-dot[data-state='error'] {
+  background: var(--error);
+}
+
+.error-line {
+  display: none;
+  flex: 0 0 auto;
+  padding: 2px var(--pad);
+  font-size: 11px;
+  color: #fff;
+  background: var(--error);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.error-line.visible {
+  display: block;
+}
+
+.menu {
+  position: fixed;
+  z-index: 100;
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  min-width: 140px;
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: rgb(255 255 255 / 0.1);
+  outline: none;
+}
+
+.menu-check {
+  display: inline-block;
+  width: 10px;
+  font-size: 10px;
+}
