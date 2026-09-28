@@ -94,9 +94,25 @@ export const SWATCHES: readonly string[] = [
   DEADLINE_COLORS.critical,
   OVERDUE_COLOR,
   '#2F4A7A', // navy
+  '#3A6EA5', // sky
+  '#2B5876', // teal blue
+  '#2A6B6B', // sea
+  '#2F5D3A', // forest
+  '#556B2F', // moss
+  '#8A6A1F', // ochre
+  '#8A4E2A', // rust
+  '#7A3B2E', // brick
+  '#8A3A4A', // rose
+  '#7A2E5A', // magenta
   '#6B3A5B', // plum
+  '#5E3A87', // violet
+  '#3B3F7A', // indigo
+  '#4A5A6A', // steel
   '#5A5A2E', // olive
   '#3C3C40', // charcoal
+  '#141416', // black
+  '#D9D5CC', // bone (dark text)
+  '#B9A88F', // sand (dark text)
 ];
 
 const SIZE_LABEL: Record<TileSize, 'sizeSm' | 'sizeMd' | 'sizeWide'> = { sm: 'sizeSm', md: 'sizeMd', wide: 'sizeWide' };
@@ -117,6 +133,11 @@ function tileSection(tip: Tip, isNextUp: boolean, now: Date, actions: DetailActi
     ...TILE_SIZES.map((s) => chip(t(SIZE_LABEL[s]), explicitSize === s, () => actions.onSetSize(tip.id, s))),
   );
   const current = (tip.color ?? '').toLowerCase();
+  const inPalette = SWATCHES.some((hex) => hex.toLowerCase() === current);
+  // Native colour picker for anything the palette lacks.
+  const picker = el('input', { type: 'color', className: 'swatch swatch-custom', 'aria-label': t('customColour'), title: t('customColour'), value: current || '#4a3b6b' });
+  if (current && !inPalette) picker.classList.add('chip-on');
+  picker.addEventListener('change', () => actions.onSetColor(tip.id, picker.value));
   const swatches = el(
     'div',
     { className: 'chip-row', role: 'group', 'aria-label': t('colour') },
@@ -128,6 +149,7 @@ function tileSection(tip: Tip, isNextUp: boolean, now: Date, actions: DetailActi
       b.title = hex;
       return b;
     }),
+    picker,
   );
   return el(
     'section',

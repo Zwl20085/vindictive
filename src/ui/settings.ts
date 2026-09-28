@@ -5,6 +5,8 @@ import { el } from './dom';
 
 export const MIN_POLL_SECONDS = 15;
 export const MAX_WEATHER_LOCATION_CHARS = 80;
+export const MIN_WINDOW_OPACITY = 20;
+export const MAX_WINDOW_OPACITY = 100;
 
 export interface SettingsActions {
   onSave: (settings: Settings) => Promise<void>;
@@ -75,6 +77,7 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
     editor_command: str('editor_command'),
     push_interval_minutes: Math.max(0, Math.round(Number(str('push_interval_minutes')) || 0)),
     fit_height: bool('fit_height'),
+    window_opacity: Math.min(MAX_WINDOW_OPACITY, Math.max(MIN_WINDOW_OPACITY, Math.round(Number(str('window_opacity')) || MAX_WINDOW_OPACITY))),
     show_panel: bool('show_panel'),
     always_on_top: bool('always_on_top'),
     autostart: bool('autostart'),
@@ -141,6 +144,7 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
       field(t('theme'), 'theme', select('theme', s.theme, THEMES)),
       field(`${t('columns')} (${MIN_COLUMNS}-${MAX_COLUMNS})`, 'columns', text('columns', String(s.columns), 'number')),
       field(t('weatherLocation'), 'weather_location', text('weather_location', s.weather_location, 'text', { placeholder: 'Tokyo', maxlength: String(MAX_WEATHER_LOCATION_CHARS) })),
+      field(t('windowOpacity'), 'window_opacity', text('window_opacity', String(s.window_opacity), 'number', { min: String(MIN_WINDOW_OPACITY), max: String(MAX_WINDOW_OPACITY), step: '5' })),
       check('show_panel', s.show_panel, t('showPanel')),
       check('fit_height', s.fit_height, t('fitHeight')),
       check('show_done', s.show_done, t('showDoneTiles')),

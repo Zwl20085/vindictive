@@ -94,6 +94,8 @@ export interface Settings {
   push_interval_minutes: number;
   /** Window height follows the tiles, up to the work area. */
   fit_height: boolean;
+  /** Background opacity of the window in percent (20..100); text stays solid. */
+  window_opacity: number;
 }
 
 /** Current conditions, fetched by the backend from Open-Meteo. */

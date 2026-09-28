@@ -144,8 +144,12 @@ The whole board flips to a single detail panel in the tile's colour:
   keys (explicit `order`, else backend rank), so only that one file changes.
   Tips without `order` keep following the score ranking around it.
 - **Tile section** in the detail view: size chips (Auto / Small / Medium /
-  Wide → `size` key) and colour swatches (the palette plus navy, plum,
-  olive, charcoal → `color` key). Each pick is one commit.
+  Wide → `size` key), 28 colour swatches and a native colour picker for any
+  other hex (→ `color` key). Each pick is one commit.
+- **Window opacity** (`window_opacity`, 20–100 %): the webview is
+  transparent and every background (ground, strip, panel, faces, tiles,
+  action bars) is mixed toward transparent by that amount with
+  `color-mix`. Text, glyphs and edges stay fully opaque.
 - **Fit height** (`fit_height`, on by default): after every board render the
   window height is set to strip + panel + grid, clamped to the monitor's
   work area, and the board re-docks. Beyond that the board scrolls with a

@@ -32,6 +32,9 @@
   --warn: #c9962b;
   --overlay: rgb(17 17 19 / 0.94);
 
+  /* Window background opacity (Settings). Backgrounds mix toward transparent; text stays solid. */
+  --alpha: 1;
+
   --flip-ms: 240ms;
   --press-ms: 160ms;
   --enter-ms: 360ms;
@@ -106,8 +109,19 @@ body {
   margin: 0;
 }
 
+/* Alpha variants of the ground and surfaces. */
+:root {
+  --bg-a: color-mix(in srgb, var(--bg) calc(var(--alpha) * 100%), transparent);
+  --surface-a: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent);
+  --surface-2-a: color-mix(in srgb, var(--surface-2) calc(var(--alpha) * 100%), transparent);
+}
+
+html {
+  background: transparent;
+}
+
 body {
-  background: var(--bg);
+  background: var(--bg-a);
   color: var(--fg);
   font-family: var(--font);
   font-weight: var(--weight-body);

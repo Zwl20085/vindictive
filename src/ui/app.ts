@@ -69,6 +69,7 @@ export class App {
 
   private applyBoard(board: BoardState): void {
     document.documentElement.dataset.theme = board.settings.theme;
+    document.documentElement.style.setProperty('--alpha', String(Math.min(100, Math.max(20, board.settings.window_opacity || 100)) / 100));
     setLocale(board.settings.language);
     const view = this.store.get().view;
     const stillExists = view.kind !== 'detail' || board.tips.some((t) => t.id === view.id);

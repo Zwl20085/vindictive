@@ -35,6 +35,7 @@ export const SAMPLE_SETTINGS: Settings = {
   editor_command: 'code',
   push_interval_minutes: 60,
   fit_height: true,
+  window_opacity: Number(query.get('opacity') ?? 100),
 };
 
 /** Realistic researcher sample data for browser development. */

@@ -11,6 +11,9 @@ pub const MIN_COLUMNS: u32 = 2;
 pub const MAX_COLUMNS: u32 = 6;
 /// Longest allowed gap between scheduled pushes of local edits.
 pub const MAX_PUSH_INTERVAL_MINUTES: u64 = 24 * 60;
+/// Window opacity range, percent. Below the minimum the board is unusable.
+pub const MIN_WINDOW_OPACITY: u8 = 20;
+pub const MAX_WINDOW_OPACITY: u8 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -69,6 +72,8 @@ pub struct Settings {
     pub push_interval_minutes: u64,
     /// Resize the window height to fit the tiles (up to the work area).
     pub fit_height: bool,
+    /// Background opacity of the whole window, percent (20..=100). Text stays solid.
+    pub window_opacity: u8,
 }
 
 impl Default for Settings {
@@ -93,6 +98,7 @@ impl Default for Settings {
             editor_command: "code".into(),
             push_interval_minutes: 60,
             fit_height: true,
+            window_opacity: 100,
         }
     }
 }
@@ -148,6 +154,11 @@ impl Settings {
             .take(MAX_LOCATION_CHARS)
             .collect();
         s.editor_command = s.editor_command.trim().to_string();
+        if !(MIN_WINDOW_OPACITY..=MAX_WINDOW_OPACITY).contains(&s.window_opacity) {
+            return Err(format!(
+                "window opacity must be between {MIN_WINDOW_OPACITY} and {MAX_WINDOW_OPACITY} percent"
+            ));
+        }
         if s.push_interval_minutes > MAX_PUSH_INTERVAL_MINUTES {
             return Err(format!(
                 "push interval must be at most {MAX_PUSH_INTERVAL_MINUTES} minutes"
@@ -253,6 +264,12 @@ mod tests {
         assert_eq!(s.editor_command, "code");
         assert_eq!(s.push_interval_minutes, 60);
         assert!(s.fit_height);
+        assert_eq!(s.window_opacity, 100);
+        let dim = Settings {
+            window_opacity: 5,
+            ..Default::default()
+        };
+        assert!(dim.validated().is_err());
         assert!(s.weather_location.is_empty());
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);

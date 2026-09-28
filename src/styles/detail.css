@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  background: var(--bg);
+  background: var(--bg-a);
   user-select: text;
   animation: detail-in 300ms var(--ease-out);
 }
@@ -20,7 +20,7 @@
 }
 
 .detail-header {
-  background: var(--tile-bg);
+  background: color-mix(in srgb, var(--tile-bg) calc(var(--alpha) * 100%), transparent);
   color: var(--tile-fg);
   padding: 10px var(--pad) 12px;
 }
@@ -252,6 +252,24 @@
   background: var(--swatch);
 }
 
+/* The native picker, drawn as a rainbow-edged swatch. */
+.swatch-custom {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: conic-gradient(#9e2f2a, #a87b1f, #3f6b3a, #2c5f58, #2f4a7a, #5e3a87, #9e2f2a);
+  cursor: pointer;
+}
+
+.swatch-custom::-webkit-color-swatch-wrapper {
+  padding: 4px;
+}
+
+.swatch-custom::-webkit-color-swatch {
+  border: 0;
+  border-radius: 0;
+}
+
 .detail-body {
   padding: 8px var(--pad);
   font-size: clamp(13px, 4.4vw, 17px);
@@ -336,5 +354,5 @@
   flex-wrap: wrap;
   gap: 2px;
   padding: 4px;
-  background: var(--surface);
+  background: var(--surface-a);
 }

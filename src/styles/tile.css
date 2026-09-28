@@ -5,7 +5,7 @@
   justify-content: space-between;
   padding: clamp(5px, 7cqh, 14px) clamp(6px, 7cqh, 14px);
   border: 0;
-  background: var(--tile-bg);
+  background: color-mix(in srgb, var(--tile-bg) calc(var(--alpha) * 100%), transparent);
   color: var(--tile-fg);
   text-align: left;
   overflow: hidden;
@@ -142,7 +142,7 @@
 .tile-add {
   align-items: center;
   justify-content: center;
-  background: var(--surface-2);
+  background: var(--surface-2-a);
   color: var(--fg-muted);
 }
 
