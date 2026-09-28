@@ -97,6 +97,7 @@ fn known_editor(command: &str) -> Option<PathBuf> {
         return None;
     }
     let mut candidates = Vec::new();
+    candidates.extend(registry_code_exe());
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         candidates.push(PathBuf::from(local).join("Programs/Microsoft VS Code/Code.exe"));
     }
@@ -106,6 +107,43 @@ fn known_editor(command: &str) -> Option<PathBuf> {
         }
     }
     candidates.into_iter().find(|p| p.is_file())
+}
+
+/// The `Code.exe` VS Code registered as an application, wherever it was
+/// installed (profiles on other drives, system-wide installs).
+#[cfg(windows)]
+fn registry_code_exe() -> Vec<PathBuf> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const KEYS: [&str; 3] = [
+        r"HKCU\Software\Classes\Applications\Code.exe\shell\open\command",
+        r"HKLM\Software\Classes\Applications\Code.exe\shell\open\command",
+        r"HKCR\Applications\Code.exe\shell\open\command",
+    ];
+    KEYS.iter()
+        .filter_map(|key| {
+            let out = Command::new("reg")
+                .args(["query", key, "/ve"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .ok()?;
+            parse_open_command(&String::from_utf8_lossy(&out.stdout))
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn registry_code_exe() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// First quoted path in a `reg query` dump of an `open\command` value,
+/// e.g. `"D:\...\Code.exe" "%1"` → `D:\...\Code.exe`.
+fn parse_open_command(dump: &str) -> Option<PathBuf> {
+    let start = dump.find('"')? + 1;
+    let end = start + dump[start..].find('"')?;
+    let path = dump[start..end].trim();
+    (!path.is_empty() && path.to_ascii_lowercase().ends_with(".exe")).then(|| PathBuf::from(path))
 }
 
 /// Run the configured editor command with the file, falling back to the
@@ -326,6 +364,17 @@ mod tests {
         assert!(local_path(root, "../a.md").is_err());
         assert!(local_path(root, "/abs.md").is_err());
         assert!(local_path(root, "tips/../../x.md").is_err());
+    }
+
+    #[test]
+    fn parses_reg_query_output() {
+        let dump = "\r\nHKEY_CURRENT_USER\\Software\\Classes\\Applications\\Code.exe\\shell\\open\\command\r\n    (Default)    REG_SZ    \"D:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe\" \"%1\"\r\n\r\n";
+        assert_eq!(
+            parse_open_command(dump),
+            Some(PathBuf::from(r"D:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe"))
+        );
+        assert_eq!(parse_open_command("ERROR: The system was unable to find the specified registry key or value."), None);
+        assert_eq!(parse_open_command("\"not an exe\" \"%1\""), None);
     }
 
     #[test]
