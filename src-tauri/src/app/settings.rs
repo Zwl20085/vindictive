@@ -237,11 +237,11 @@ mod tests {
     #[test]
     fn language_and_weather_fields() {
         let s: Settings =
-            serde_json::from_str(r#"{"language":"zh","weather_location":"  Brisbane  "}"#)
+            serde_json::from_str(r#"{"language":"zh","weather_location":"  Tokyo  "}"#)
                 .unwrap();
         assert_eq!(s.language, Language::Zh);
         let clean = s.validated().unwrap();
-        assert_eq!(clean.weather_location, "Brisbane");
+        assert_eq!(clean.weather_location, "Tokyo");
         assert!(serde_json::to_string(&clean)
             .unwrap()
             .contains("\"language\":\"zh\""));

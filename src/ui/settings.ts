@@ -137,7 +137,7 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
       field(t('language'), 'language', select('language', s.language, LOCALES)),
       field(t('theme'), 'theme', select('theme', s.theme, THEMES)),
       field(`${t('columns')} (${MIN_COLUMNS}-${MAX_COLUMNS})`, 'columns', text('columns', String(s.columns), 'number')),
-      field(t('weatherLocation'), 'weather_location', text('weather_location', s.weather_location, 'text', { placeholder: 'Brisbane', maxlength: String(MAX_WEATHER_LOCATION_CHARS) })),
+      field(t('weatherLocation'), 'weather_location', text('weather_location', s.weather_location, 'text', { placeholder: 'Tokyo', maxlength: String(MAX_WEATHER_LOCATION_CHARS) })),
       check('show_panel', s.show_panel, t('showPanel')),
       check('show_done', s.show_done, t('showDoneTiles')),
     ),

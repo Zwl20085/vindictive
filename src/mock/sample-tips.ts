@@ -30,7 +30,7 @@ export const SAMPLE_SETTINGS: Settings = {
   columns: 4,
   show_done: false,
   language: query.get('lang') === 'zh' ? 'zh' : 'en',
-  weather_location: query.get('weather') ?? 'Brisbane',
+  weather_location: query.get('weather') ?? 'Tokyo',
   show_panel: query.get('panel') !== '0',
 };
 

@@ -88,7 +88,7 @@ export interface Settings {
 
 /** Current conditions, fetched by the backend from Open-Meteo. */
 export interface Weather {
-  /** Resolved place name, e.g. `Brisbane`. */
+  /** Resolved place name, e.g. `Tokyo`. */
   location: string;
   temperature_c: number;
   high_c?: number;

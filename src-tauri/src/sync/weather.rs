@@ -167,11 +167,11 @@ mod tests {
     #[test]
     fn parses_geocode() {
         let json = serde_json::json!({
-            "results": [{"name": "Brisbane", "latitude": -27.47, "longitude": 153.03, "country": "Australia"}]
+            "results": [{"name": "Tokyo", "latitude": 35.69, "longitude": 139.69, "country": "Japan"}]
         });
         let place = parse_geocode(&json).unwrap();
-        assert_eq!(place.name, "Brisbane");
-        assert!((place.latitude + 27.47).abs() < 1e-9);
+        assert_eq!(place.name, "Tokyo");
+        assert!((place.latitude - 35.69).abs() < 1e-9);
         assert!(parse_geocode(&serde_json::json!({"results": []})).is_none());
         assert!(parse_geocode(&serde_json::json!({"generationtime_ms": 1.0})).is_none());
     }
@@ -191,8 +191,8 @@ mod tests {
                 "temperature_2m_min": [15.7]
             }
         });
-        let w = parse_forecast(&json, "Brisbane", at()).unwrap();
-        assert_eq!(w.location, "Brisbane");
+        let w = parse_forecast(&json, "Tokyo", at()).unwrap();
+        assert_eq!(w.location, "Tokyo");
         assert_eq!(w.code, 2);
         assert!(w.is_day);
         assert_eq!(w.high_c, Some(26.1));
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn serialises_like_the_frontend_expects() {
         let w = Weather {
-            location: "Brisbane".into(),
+            location: "Tokyo".into(),
             temperature_c: 23.4,
             high_c: None,
             low_c: None,
