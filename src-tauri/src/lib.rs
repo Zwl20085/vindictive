@@ -1,4 +1,4 @@
-//! Vindictive: an always-on-top tile board of what to do next.
+//! Vindictive: a tile board of what to do next.
 
 pub mod app;
 pub mod core;

@@ -1,6 +1,6 @@
 [package]
 name = "vindictive"
-version = "0.1.0"
+version = "0.2.0"
 description = "Always-on-top tile board of what to do next, synced with GitHub."
 authors = ["Wentao Zhang"]
 license = "MIT"

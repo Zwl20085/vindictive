@@ -150,6 +150,10 @@ The whole board flips to a single detail panel in the tile's colour:
   transparent and every background (ground, strip, panel, faces, tiles,
   action bars) is mixed toward transparent by that amount with
   `color-mix`. Text, glyphs and edges stay fully opaque.
+- **Startup size.** The board is sized to half the work area width and the
+  full work area height (minus the 12 px edge margin) on every launch, then
+  docked and shown. `tauri.conf.json` creates it hidden so the placeholder
+  size never flashes.
 - **Fit height** (`fit_height`, on by default): after every board render the
   window height is set to strip + panel + grid, clamped to the monitor's
   work area, and the board re-docks. Beyond that the board scrolls with a
@@ -168,7 +172,8 @@ The whole board flips to a single detail panel in the tile's colour:
 - Settings is an overlay in the same window, in three groups: GitHub (owner,
   repo, branch, dir, token in Windows Credential Manager, poll interval);
   appearance (language, theme, columns, weather city, panel, show done);
-  window (hotkey, dock, always on top, autostart, notify on new tips).
+  window (hotkey, dock, always on top (off by default), autostart, notify on
+  new tips).
 
 ### Capture window
 

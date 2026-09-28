@@ -86,7 +86,7 @@ impl Default for Settings {
             poll_seconds: 60,
             hotkey: "Ctrl+Shift+Space".into(),
             dock: Dock::Right,
-            always_on_top: true,
+            always_on_top: false,
             autostart: false,
             notify_new_tips: true,
             theme: Theme::Dark,
@@ -264,6 +264,7 @@ mod tests {
         assert_eq!(s.editor_command, "code");
         assert_eq!(s.push_interval_minutes, 60);
         assert!(s.fit_height);
+        assert!(!s.always_on_top);
         assert_eq!(s.window_opacity, 100);
         let dim = Settings {
             window_opacity: 5,
