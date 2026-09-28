@@ -35,6 +35,13 @@
   transform: rotateY(180deg);
 }
 
+/* Only the face that is showing takes input. The flipped-away face is
+   invisible but would otherwise still swallow wheel events, so the board
+   could not scroll. */
+.stage:not(.open) .face-back {
+  pointer-events: none;
+}
+
 .stage.open .face-front {
   transform: rotateY(-180deg);
   pointer-events: none;
