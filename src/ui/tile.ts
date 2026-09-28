@@ -109,6 +109,7 @@ export function renderTile(options: TileOptions): HTMLButtonElement {
       'data-id': tip.id,
       'aria-label': ariaLabel(tip, cd, isNextUp),
       title: tip.title,
+      draggable: 'true',
     },
     size === 'sm' ? null : thumbnail(tip, resolveImage),
     topRow(tip, cd, isNextUp),

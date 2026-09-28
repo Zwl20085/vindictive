@@ -47,6 +47,8 @@ export interface Tip {
   color?: string;
   /** Optional tile size override: `sm`, `md` or `wide`. */
   size?: string;
+  /** Manual board position from drag and drop; absent = by score. */
+  order?: number;
   arxiv?: string;
   doi?: string;
   paper?: Paper;
@@ -149,6 +151,8 @@ export interface Commands {
   set_color: (args: { id: string; color: string | null }) => BoardState;
   /** Set (`sm` | `md` | `wide`) or clear (`null`) the tile size override. */
   set_size: (args: { id: string; size: string | null }) => BoardState;
+  /** Set or clear (`null`) the manual board position. */
+  set_order: (args: { id: string; order: number | null }) => BoardState;
   /** Resize the window to `height` logical px (clamped to the work area). */
   fit_window: (args: { height: number }) => void;
   /** Quick-capture line, see `core/capture.rs` for the syntax. */

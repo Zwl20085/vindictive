@@ -138,6 +138,11 @@ The whole board flips to a single detail panel in the tile's colour:
 - Themes: `dark`, `light`, `nerv` (near-black, orange edge), `cobalt` (deep
   blue), `paper` (warm off-white). Themes change only the ground, text and
   edge tokens; tile colours are shared.
+- **Drag to reorder.** Tiles are HTML5 draggable. Drop on the left half of a
+  tile to land before it, the right half to land after, or on empty grid to
+  go last. The moved tip gets `order` = midpoint of its new neighbours' sort
+  keys (explicit `order`, else backend rank), so only that one file changes.
+  Tips without `order` keep following the score ranking around it.
 - **Tile section** in the detail view: size chips (Auto / Small / Medium /
   Wide → `size` key) and colour swatches (the palette plus navy, plum,
   olive, charcoal → `color` key). Each pick is one commit.

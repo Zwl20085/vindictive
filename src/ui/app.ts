@@ -186,6 +186,7 @@ export class App {
         onOpen: (id) => this.store.set({ view: { kind: 'detail', id } }),
         onMenu: (id, x, y) => this.tileMenu(id, x, y),
         onAdd: () => this.store.set({ adding: true }),
+        onReorder: (id, order) => void this.mutate(() => call('set_order', { id, order }), 'set_order'),
       }),
     );
     fitTitles(this.front);

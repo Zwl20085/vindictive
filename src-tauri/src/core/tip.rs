@@ -81,6 +81,9 @@ pub struct FrontMatter {
     /// Tile size override: `sm`, `md` or `wide`. Absent means automatic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<String>,
+    /// Manual board position (set by drag and drop); absent means by score.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arxiv: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

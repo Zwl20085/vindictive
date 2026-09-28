@@ -23,6 +23,7 @@ images:
 repeat: weekly on mon at 10:00   # daily | weekdays | weekly on mon,thu | monthly on 1 | yearly on 03-15
 color: "#FF0097"                 # optional tile colour override
 size: md                         # optional tile size override: sm | md | wide
+order: 2.5                       # optional manual position, written by drag and drop
 arxiv: 2401.12345                # or
 doi: 10.1109/TIE.2024.1234567
 ---
@@ -67,6 +68,7 @@ pushed local edit); by then they have done their job.
 | `paper`         | arXiv / Crossref metadata was fetched                     |
 | `created`       | the tip was made with quick capture                       |
 | `color`, `size` | you pick a swatch or size in the tile's detail view       |
+| `order`         | you drag a tile to a new place on the board               |
 
 ## Quick-capture syntax
 

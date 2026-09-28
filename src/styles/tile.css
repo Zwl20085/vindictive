@@ -125,6 +125,19 @@
   -webkit-line-clamp: 3;
 }
 
+/* Drag and drop: the dragged tile dims; the drop slot shows as a thick edge. */
+.tile-dragging {
+  opacity: 0.4;
+}
+
+.tile-drop-before {
+  box-shadow: inset 4px 0 0 var(--edge);
+}
+
+.tile-drop-after {
+  box-shadow: inset -4px 0 0 var(--edge);
+}
+
 /* Trailing "+" tile: a quiet surface block. */
 .tile-add {
   align-items: center;

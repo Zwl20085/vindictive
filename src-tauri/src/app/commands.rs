@@ -122,6 +122,27 @@ pub async fn set_size(
     Ok(state.snapshot())
 }
 
+/// Set or clear (`None`) the manual board position written by drag and drop.
+#[tauri::command]
+pub async fn set_order(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    order: Option<f64>,
+) -> Result<BoardState, String> {
+    if let Some(o) = order {
+        if !o.is_finite() {
+            return Err("order must be a finite number".into());
+        }
+    }
+    let tip = find(&state, &id)?;
+    let mut front = tip.front.clone();
+    front.order = order;
+    let msg = format!("vindictive: move \"{}\"", tip.front.title);
+    state.save_tip(&app, tip.with_front(front), &msg).await?;
+    Ok(state.snapshot())
+}
+
 /// Commit every pending local edit now.
 #[tauri::command]
 pub async fn push_now(app: AppHandle, state: State<'_, AppState>) -> Result<BoardState, String> {

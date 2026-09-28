@@ -76,6 +76,7 @@ pub fn run() {
             commands::edit_local,
             commands::set_color,
             commands::set_size,
+            commands::set_order,
             commands::push_now,
             commands::fit_window,
             commands::create_tip,

@@ -146,6 +146,7 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
   push_now: () => buildState(),
   fit_window: () => undefined,
   set_color: ({ id, color }) => update({ tips: replaceTip(id, (t) => ({ ...t, color: color ?? undefined })) }),
+  set_order: ({ id, order }) => update({ tips: replaceTip(id, (t) => ({ ...t, order: order ?? undefined })) }),
   set_size: ({ id, size }) => update({ tips: replaceTip(id, (t) => ({ ...t, size: size ?? undefined })) }),
   edit_local: ({ id }) => {
     const tip = store.tips.find((t) => t.id === id);

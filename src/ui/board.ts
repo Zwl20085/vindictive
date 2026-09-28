@@ -1,6 +1,7 @@
 import type { BoardState, Tip } from '../types';
 import { t } from '../lib/i18n';
 import type { ImageResolver } from '../lib/markdown';
+import { applyManualOrder, orderForMove } from '../lib/order';
 import { parseNaive } from '../lib/time';
 import { el, mount } from './dom';
 import { renderTile } from './tile';
@@ -16,6 +17,8 @@ export interface BoardOptions {
   onMenu?: (id: string, x: number, y: number) => void;
   /** Click on the trailing "+" tile. When absent, no add tile is rendered. */
   onAdd?: () => void;
+  /** A tile was dropped somewhere else: persist its new `order`. */
+  onReorder?: (id: string, order: number) => void;
   /**
    * Ids already shown on the board. Tiles not in the set play the entry
    * animation and are added to it; pass nothing to animate every tile.
@@ -34,11 +37,70 @@ function isSnoozed(tip: Tip, now: Date): boolean {
   return !!until && until > now;
 }
 
-/** Tips the board should show, honouring the "show done" setting. */
+/** Tips the board should show, honouring the "show done" setting and manual order. */
 export function visibleTips(state: BoardState, now: Date): Tip[] {
-  return state.tips.filter((tip) => {
+  const shown = state.tips.filter((tip) => {
     if (tip.status === 'done') return state.settings.show_done;
     return !isSnoozed(tip, now);
+  });
+  return applyManualOrder(shown);
+}
+
+/**
+ * HTML5 drag and drop between tiles. The drop position is "before" the
+ * hovered tile when the pointer is in its left half, "after" otherwise;
+ * dropping on empty grid space moves the tile to the end.
+ */
+function wireDragAndDrop(grid: HTMLElement, ranked: readonly Tip[], onReorder: (id: string, order: number) => void): void {
+  let dragged: string | undefined;
+  const tiles = (): HTMLElement[] => Array.from(grid.querySelectorAll<HTMLElement>('.tile:not(.tile-add)'));
+  const clearMarks = (): void => tiles().forEach((t) => t.classList.remove('tile-drop-before', 'tile-drop-after'));
+  const target = (event: DragEvent): { tile: HTMLElement; after: boolean } | undefined => {
+    const tile = (event.target as HTMLElement | null)?.closest<HTMLElement>('.tile:not(.tile-add)');
+    if (!tile || tile.dataset.id === dragged) return undefined;
+    const rect = tile.getBoundingClientRect();
+    return { tile, after: event.clientX > rect.left + rect.width / 2 };
+  };
+  grid.addEventListener('dragstart', (event) => {
+    const tile = (event.target as HTMLElement | null)?.closest<HTMLElement>('.tile:not(.tile-add)');
+    if (!tile?.dataset.id) return;
+    dragged = tile.dataset.id;
+    tile.classList.add('tile-dragging');
+    event.dataTransfer?.setData('text/plain', dragged);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  });
+  grid.addEventListener('dragover', (event) => {
+    if (!dragged) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    clearMarks();
+    const t = target(event);
+    if (t) t.tile.classList.add(t.after ? 'tile-drop-after' : 'tile-drop-before');
+  });
+  grid.addEventListener('dragleave', (event) => {
+    if (event.target === grid) clearMarks();
+  });
+  grid.addEventListener('drop', (event) => {
+    if (!dragged) return;
+    event.preventDefault();
+    const id = dragged;
+    const t = target(event);
+    const others = tiles().filter((x) => x.dataset.id !== id);
+    let index = others.length;
+    if (t) {
+      const i = others.indexOf(t.tile);
+      index = i < 0 ? others.length : i + (t.after ? 1 : 0);
+    }
+    clearMarks();
+    grid.querySelector('.tile-dragging')?.classList.remove('tile-dragging');
+    dragged = undefined;
+    const order = orderForMove(ranked, id, index);
+    if (order !== undefined) onReorder(id, order);
+  });
+  grid.addEventListener('dragend', () => {
+    clearMarks();
+    grid.querySelector('.tile-dragging')?.classList.remove('tile-dragging');
+    dragged = undefined;
   });
 }
 
@@ -60,7 +122,7 @@ function emptyMessage(state: BoardState): HTMLElement {
 
 /** Render the tile grid into a fresh element. */
 export function renderBoard(options: BoardOptions): HTMLElement {
-  const { state, now, onOpen, onMenu, onAdd, seen, resolveImage } = options;
+  const { state, now, onOpen, onMenu, onAdd, onReorder, seen, resolveImage } = options;
   const columns = clampColumns(state.settings.columns);
   const grid = el('div', { className: 'board', role: 'list' });
   grid.style.setProperty('--cols', String(columns));
@@ -78,6 +140,11 @@ export function renderBoard(options: BoardOptions): HTMLElement {
     return renderTile({ tip, isNextUp: tip.id === state.next_up, now, columns, onOpen, onMenu, enterIndex, resolveImage });
   });
   mount(grid, ...tiles, onAdd ? addTile(onAdd) : null);
+  if (onReorder) {
+    // Keys come from the backend ranking (before manual order is applied).
+    const ranked = state.tips.filter((tip) => tips.some((t) => t.id === tip.id));
+    wireDragAndDrop(grid, ranked, onReorder);
+  }
   return grid;
 }
 

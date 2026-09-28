@@ -25,7 +25,8 @@
         "resizable": true,
         "transparent": false,
         "shadow": false,
-        "visible": true
+        "visible": true,
+        "dragDropEnabled": false
       },
       {
         "label": "capture",
@@ -48,7 +49,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": [
+      "nsis",
+      "msi"
+    ],
     "publisher": "Wentao Zhang",
     "shortDescription": "Always-on-top tile board of what to do next, synced with GitHub.",
     "longDescription": "Vindictive shows your research to-dos as Windows 8 style live tiles that stay on top of every window, raises native toasts at remind times, and keeps every tip as a Markdown file in your own GitHub repository.",
