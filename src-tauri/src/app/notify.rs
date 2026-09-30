@@ -15,6 +15,8 @@ use crate::core::tip::{Kind, Tip};
 const RETENTION_DAYS: i64 = 60;
 /// A reminder older than this at the time it is first seen is not re-fired.
 const STALE_HOURS: i64 = 12;
+/// Timestamp format at the end of every fired key.
+const KEY_TIME: &str = "%Y-%m-%dT%H:%M";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Toast {
@@ -30,7 +32,7 @@ pub fn due_reminders(tips: &[Tip], fired: &BTreeSet<String>, now: NaiveDateTime)
     for tip in visible(tips, now) {
         for at in &tip.remind_at {
             if *at <= now && *at > stale_before {
-                let key = format!("{}@{}", tip.id, at.format("%Y-%m-%dT%H:%M"));
+                let key = format!("{}@{}", tip.id, at.format(KEY_TIME));
                 if !fired.contains(&key) {
                     out.push(Toast {
                         key,
@@ -40,12 +42,13 @@ pub fn due_reminders(tips: &[Tip], fired: &BTreeSet<String>, now: NaiveDateTime)
                 }
             }
         }
-        if matches!(tip.front.kind, Kind::Deadline | Kind::Task | Kind::Event)
-            && urgency(tip.due_at, now) == Urgency::Overdue
-        {
-            let key = format!("{}@overdue", tip.id);
-            let recent = tip.due_at.map(|d| d > stale_before).unwrap_or(false);
-            if recent && !fired.contains(&key) {
+        if let Some(due) = tip.due_at.filter(|_| {
+            matches!(tip.front.kind, Kind::Deadline | Kind::Task | Kind::Event)
+                && urgency(tip.due_at, now) == Urgency::Overdue
+        }) {
+            // One key per due date, so a recurring or rescheduled tip warns again.
+            let key = format!("{}@overdue@{}", tip.id, due.format(KEY_TIME));
+            if due > stale_before && !fired.contains(&key) {
                 out.push(Toast {
                     key,
                     title: format!("Overdue: {}", tip.display_title()),
@@ -105,22 +108,22 @@ pub fn human_delta(target: NaiveDateTime, now: NaiveDateTime) -> String {
 }
 
 /// Drop fired keys older than the retention window so the file stays small.
+/// Keys without a timestamp (the old `id@overdue` form) are dropped too.
 pub fn prune_fired(fired: &BTreeSet<String>, now: NaiveDateTime) -> BTreeSet<String> {
     let cutoff = now - chrono::Duration::days(RETENTION_DAYS);
     fired
         .iter()
-        .filter(
-            |k| match k.rsplit_once('@').and_then(|(_, t)| parse_key_time(t)) {
-                Some(t) => t >= cutoff,
-                None => true,
-            },
-        )
+        .filter(|k| {
+            k.rsplit_once('@')
+                .and_then(|(_, t)| parse_key_time(t))
+                .is_some_and(|t| t >= cutoff)
+        })
         .cloned()
         .collect()
 }
 
 fn parse_key_time(t: &str) -> Option<NaiveDateTime> {
-    NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M").ok()
+    NaiveDateTime::parse_from_str(t, KEY_TIME).ok()
 }
 
 pub fn show<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) {
@@ -170,9 +173,32 @@ mod tests {
         let now = dt("2026-10-01 10:30");
         let toasts = due_reminders(&[deadline, note], &BTreeSet::new(), now);
         assert_eq!(toasts.len(), 1);
-        assert_eq!(toasts[0].key, "t@overdue");
+        assert_eq!(toasts[0].key, "t@overdue@2026-10-01T10:00");
         assert_eq!(toasts[0].title, "Overdue: D");
         assert_eq!(toasts[0].body, "Due 30m ago");
+    }
+
+    #[test]
+    fn overdue_fires_again_for_a_new_due_date() {
+        let first = tip("---
+title: D
+kind: deadline
+due: 2026-10-01 10:00
+---
+");
+        let fired: BTreeSet<String> =
+            due_reminders(&[first], &BTreeSet::new(), dt("2026-10-01 10:30"))
+                .into_iter()
+                .map(|t| t.key)
+                .collect();
+        let moved = tip("---
+title: D
+kind: deadline
+due: 2026-10-08 10:00
+---
+");
+        let again = due_reminders(&[moved], &fired, dt("2026-10-08 10:30"));
+        assert_eq!(again.len(), 1);
     }
 
     #[test]
@@ -198,13 +224,19 @@ mod tests {
     #[test]
     fn prunes_old_keys() {
         let now = dt("2026-10-01 12:00");
-        let fired: BTreeSet<String> = ["a@2026-01-01T09:00", "b@2026-09-30T09:00", "c@overdue"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let fired: BTreeSet<String> = [
+            "a@2026-01-01T09:00",
+            "b@2026-09-30T09:00",
+            "c@overdue",
+            "d@overdue@2026-09-30T09:00",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let pruned = prune_fired(&fired, now);
         assert!(!pruned.contains("a@2026-01-01T09:00"));
         assert!(pruned.contains("b@2026-09-30T09:00"));
-        assert!(pruned.contains("c@overdue"));
+        assert!(!pruned.contains("c@overdue"), "legacy key without a time");
+        assert!(pruned.contains("d@overdue@2026-09-30T09:00"));
     }
 }

@@ -5,6 +5,11 @@
 //! picks "Commit & push now". When the local copy is untouched and the tip
 //! changes elsewhere (Done, snooze, a remote edit), the file is refreshed so
 //! the editor always shows the truth. Sessions persist across restarts.
+//!
+//! A push is based on the SHA the local copy started from, so a tip that
+//! changed elsewhere meanwhile is a conflict, never a silent overwrite. The
+//! local copy is kept, GitHub's version is written next to it as
+//! `<name>.remote.md`, and nothing is pushed until the user saves again.
 
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -14,6 +19,7 @@ use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use super::notify;
 use super::state::{now, AppState};
 use crate::core::tip::Tip;
 
@@ -31,6 +37,13 @@ pub struct EditSession {
     /// Latest saved content that has not been pushed yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending: Option<String>,
+    /// Blob SHA of the version `last` came from; pushes are based on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_sha: Option<String>,
+    /// The tip changed on GitHub under a pending edit. Held back until the
+    /// user saves the file again (after merging `<name>.remote.md`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub conflict: bool,
 }
 
 /// Directory holding local copies: `<app data>/edit/<repo path>`.
@@ -46,10 +59,7 @@ pub fn edit_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// could escape it.
 pub fn local_path(root: &Path, repo_path: &str) -> Result<PathBuf, String> {
     let rel = Path::new(repo_path);
-    if rel
-        .components()
-        .any(|c| !matches!(c, Component::Normal(_)))
-    {
+    if rel.components().any(|c| !matches!(c, Component::Normal(_))) {
         return Err(format!("refusing to edit path {repo_path:?}"));
     }
     Ok(root.join(rel))
@@ -72,7 +82,8 @@ pub fn open(app: &AppHandle, state: &AppState, id: &str) -> Result<PathBuf, Stri
     let existing = state.with(|i| i.edits.get(id).cloned());
     let keep_local = existing.is_some() && path.is_file();
     if !keep_local {
-        std::fs::write(&path, &text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        std::fs::write(&path, &text)
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         state.update_edits(|edits| {
             edits.insert(
                 id.to_string(),
@@ -81,6 +92,8 @@ pub fn open(app: &AppHandle, state: &AppState, id: &str) -> Result<PathBuf, Stri
                     path: path.clone(),
                     last: text,
                     pending: None,
+                    base_sha: tip.sha.clone(),
+                    conflict: false,
                 },
             );
         });
@@ -216,12 +229,23 @@ async fn tick(app: &AppHandle) {
 /// refresh untouched files whose tip changed on the board.
 fn collect_saves(state: &AppState) {
     let sessions: Vec<EditSession> = state.with(|i| i.edits.values().cloned().collect());
+    // A missing tip only means "deleted" once a sync has confirmed it; before
+    // that the board may just be empty (fresh start, repo switch).
+    let synced = state.with(|i| i.last_sync.is_some() && i.sync_error.is_none());
     for session in sessions {
         let Some(current) = state.board().get(&session.id).cloned() else {
-            // Deleted from the board (locally or remotely): stop watching.
-            state.update_edits(|e| {
-                e.remove(&session.id);
-            });
+            if session.pending.is_none() || synced {
+                if session.pending.is_some() {
+                    log::warn!(
+                        "{} was deleted; its unpushed local copy stays at {}",
+                        session.id,
+                        session.path.display()
+                    );
+                }
+                state.update_edits(|e| {
+                    e.remove(&session.id);
+                });
+            }
             continue;
         };
         let local = match std::fs::read_to_string(&session.path) {
@@ -239,9 +263,11 @@ fn collect_saves(state: &AppState) {
         };
         if local != session.last {
             if session.pending.as_deref() != Some(local.as_str()) {
+                // A new save; after a conflict it means the user merged.
                 state.update_edits(|e| {
                     if let Some(s) = e.get_mut(&session.id) {
                         s.pending = Some(local.clone());
+                        s.conflict = false;
                     }
                 });
             }
@@ -250,6 +276,7 @@ fn collect_saves(state: &AppState) {
             state.update_edits(|e| {
                 if let Some(s) = e.get_mut(&session.id) {
                     s.pending = None;
+                    s.conflict = false;
                 }
             });
         } else {
@@ -264,7 +291,7 @@ fn push_due(state: &AppState) -> bool {
         (
             i.settings.push_interval_minutes,
             i.last_push,
-            i.edits.values().any(|s| s.pending.is_some()),
+            i.edits.values().any(|s| s.pending.is_some() && !s.conflict),
         )
     });
     if !pending {
@@ -282,27 +309,40 @@ pub async fn push_pending(app: &AppHandle, state: &AppState) -> usize {
     let sessions: Vec<EditSession> = state.with(|i| {
         i.edits
             .values()
-            .filter(|s| s.pending.is_some())
+            .filter(|s| s.pending.is_some() && !s.conflict)
             .cloned()
             .collect()
     });
     let mut pushed = 0;
     for session in sessions {
-        let Some(local) = session.pending.clone() else { continue };
-        let Some(current) = state.board().get(&session.id).cloned() else { continue };
-        let parsed = match Tip::parse(&current.path, current.sha.clone(), &local) {
+        let Some(local) = session.pending.clone() else {
+            continue;
+        };
+        let Some(current) = state.board().get(&session.id).cloned() else {
+            continue;
+        };
+        let base = session.base_sha.clone().or_else(|| current.sha.clone());
+        let parsed = match Tip::parse(&current.path, base.clone(), &local) {
             Ok(tip) => tip,
             Err(e) => {
-                log::warn!("{} not pushed (fix the file and save again): {e}", session.path.display());
+                log::warn!(
+                    "{} not pushed (fix the file and save again): {e}",
+                    session.path.display()
+                );
                 continue;
             }
         };
         let msg = format!("vindictive: edit \"{}\" locally", parsed.front.title);
         match state.save_tip(app, parsed, &msg).await {
             Ok(saved) => {
-                // Canonical form back to disk so the next tick sees no difference.
+                // Canonical form back to disk so the next tick sees no
+                // difference, unless the user saved again during the push:
+                // that newer save is picked up as pending on the next tick.
                 let canonical = saved.to_markdown().unwrap_or_else(|_| local.clone());
-                if canonical != local {
+                let untouched = std::fs::read_to_string(&session.path)
+                    .map(|on_disk| on_disk == local)
+                    .unwrap_or(false);
+                if untouched && canonical != local {
                     if let Err(e) = std::fs::write(&session.path, &canonical) {
                         log::warn!("cannot rewrite {}: {e}", session.path.display());
                     }
@@ -311,12 +351,20 @@ pub async fn push_pending(app: &AppHandle, state: &AppState) -> usize {
                     if let Some(s) = e.get_mut(&session.id) {
                         s.last = canonical;
                         s.pending = None;
+                        s.base_sha = saved.sha.clone();
                     }
                 });
                 pushed += 1;
                 log::info!("pushed local edit of {}", session.id);
             }
-            Err(e) => log::warn!("local edit of {} not pushed: {e}", session.id),
+            Err(e) => {
+                // `save_tip` resynced; a new SHA means the tip moved on.
+                let latest = state.board().get(&session.id).cloned();
+                match latest.filter(|t| t.sha.is_some() && t.sha != base) {
+                    Some(remote) => mark_conflict(app, state, &session, &remote),
+                    None => log::warn!("local edit of {} not pushed: {e}", session.id),
+                }
+            }
         }
     }
     state.with(|i| i.last_push = Some(now()));
@@ -326,9 +374,50 @@ pub async fn push_pending(app: &AppHandle, state: &AppState) -> usize {
     pushed
 }
 
+/// `tips/a.md` -> `tips/a.remote.md`, where GitHub's side of a conflict goes.
+pub fn remote_copy_path(path: &Path) -> PathBuf {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    path.with_file_name(format!("{stem}.remote.md"))
+}
+
+/// Hold a pending edit back: GitHub has a newer version of the tip.
+fn mark_conflict(app: &AppHandle, state: &AppState, session: &EditSession, remote: &Tip) {
+    let copy = remote_copy_path(&session.path);
+    match remote.to_markdown() {
+        Ok(text) => {
+            if let Err(e) = std::fs::write(&copy, text) {
+                log::warn!("cannot write {}: {e}", copy.display());
+            }
+        }
+        Err(e) => log::warn!("cannot render {}: {e}", remote.id),
+    }
+    state.update_edits(|e| {
+        if let Some(s) = e.get_mut(&session.id) {
+            s.conflict = true;
+            s.base_sha = remote.sha.clone();
+        }
+    });
+    log::warn!(
+        "local edit of {} conflicts with GitHub; kept, remote copy at {}",
+        session.id,
+        copy.display()
+    );
+    let name = copy.file_name().unwrap_or_default().to_string_lossy();
+    notify::show(
+        app,
+        &format!("Not pushed: {}", remote.display_title()),
+        &format!(
+            "It changed on GitHub while you edited it. Your copy is kept; \
+             GitHub's version is in {name}. Merge and save to push."
+        ),
+    );
+}
+
 /// The board changed while the file was untouched: refresh the file.
 fn refresh_from_board(state: &AppState, session: &EditSession, current: &Tip) {
-    let Ok(text) = current.to_markdown() else { return };
+    let Ok(text) = current.to_markdown() else {
+        return;
+    };
     if text == session.last {
         return;
     }
@@ -336,6 +425,7 @@ fn refresh_from_board(state: &AppState, session: &EditSession, current: &Tip) {
         Ok(()) => state.update_edits(|e| {
             if let Some(s) = e.get_mut(&session.id) {
                 s.last = text;
+                s.base_sha = current.sha.clone();
             }
         }),
         Err(e) => log::warn!("cannot refresh {}: {e}", session.path.display()),
@@ -343,7 +433,10 @@ fn refresh_from_board(state: &AppState, session: &EditSession, current: &Tip) {
 }
 
 /// When the next scheduled push is due, for display.
-pub fn next_push_at(interval_minutes: u64, last_push: Option<NaiveDateTime>) -> Option<NaiveDateTime> {
+pub fn next_push_at(
+    interval_minutes: u64,
+    last_push: Option<NaiveDateTime>,
+) -> Option<NaiveDateTime> {
     match (interval_minutes, last_push) {
         (0, _) | (_, None) => None,
         (m, Some(last)) => Some(last + chrono::Duration::minutes(m as i64)),
@@ -371,9 +464,16 @@ mod tests {
         let dump = "\r\nHKEY_CURRENT_USER\\Software\\Classes\\Applications\\Code.exe\\shell\\open\\command\r\n    (Default)    REG_SZ    \"D:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe\" \"%1\"\r\n\r\n";
         assert_eq!(
             parse_open_command(dump),
-            Some(PathBuf::from(r"D:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe"))
+            Some(PathBuf::from(
+                r"D:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe"
+            ))
         );
-        assert_eq!(parse_open_command("ERROR: The system was unable to find the specified registry key or value."), None);
+        assert_eq!(
+            parse_open_command(
+                "ERROR: The system was unable to find the specified registry key or value."
+            ),
+            None
+        );
         assert_eq!(parse_open_command("\"not an exe\" \"%1\""), None);
     }
 
@@ -398,8 +498,85 @@ mod tests {
             path: PathBuf::from("C:/x/a.md"),
             last: "---\ntitle: A\n---\n".into(),
             pending: Some("---\ntitle: B\n---\n".into()),
+            base_sha: Some("abc".into()),
+            conflict: true,
         };
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<EditSession>(&text).unwrap(), s);
+        // Sessions saved by older versions still load.
+        let old = r#"{"id":"a","path":"C:/x/a.md","last":"x"}"#;
+        let loaded: EditSession = serde_json::from_str(old).unwrap();
+        assert_eq!((loaded.base_sha, loaded.conflict), (None, false));
+    }
+
+    #[test]
+    fn remote_copy_sits_next_to_the_file() {
+        assert_eq!(
+            remote_copy_path(Path::new("C:/data/edit/tips/a.md")),
+            Path::new("C:/data/edit/tips/a.remote.md")
+        );
+    }
+
+    fn state_in(dir: &Path) -> AppState {
+        AppState::load(super::super::storage::Storage::new(dir.join("data")))
+    }
+
+    fn watch(dir: &Path, state: &AppState, id: &str, on_disk: &str) -> PathBuf {
+        let path = dir.join(format!("{id}.md"));
+        std::fs::write(&path, on_disk).unwrap();
+        state.update_edits(|e| {
+            e.insert(
+                id.into(),
+                EditSession {
+                    id: id.into(),
+                    path: path.clone(),
+                    last: "---\ntitle: A\n---\n".into(),
+                    pending: None,
+                    base_sha: Some("1".into()),
+                    conflict: false,
+                },
+            );
+        });
+        path
+    }
+
+    #[test]
+    fn unpushed_edit_survives_an_empty_board_until_a_sync_confirms() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_in(dir.path());
+        let tip = Tip::parse("tips/a.md", Some("1".into()), "---\ntitle: A\n---\n").unwrap();
+        state.replace_board(super::super::board::Board::new(vec![tip]));
+        watch(dir.path(), &state, "a", "---\ntitle: A edited\n---\n");
+        collect_saves(&state);
+        assert!(state.with(|i| i.edits["a"].pending.is_some()));
+        // Board emptied before any sync (repo switch, unreadable cache): keep it.
+        state.replace_board(Default::default());
+        collect_saves(&state);
+        assert!(state.with(|i| i.edits["a"].pending.is_some()));
+        // A successful sync without the tip: now it really is gone.
+        state.with(|i| i.last_sync = Some(now()));
+        collect_saves(&state);
+        assert!(state.with(|i| i.edits.is_empty()));
+    }
+
+    #[test]
+    fn saving_again_clears_a_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_in(dir.path());
+        let tip = Tip::parse("tips/a.md", Some("2".into()), "---\ntitle: A\n---\n").unwrap();
+        state.replace_board(super::super::board::Board::new(vec![tip]));
+        let path = watch(dir.path(), &state, "a", "---\ntitle: mine\n---\n");
+        collect_saves(&state);
+        state.update_edits(|e| e.get_mut("a").unwrap().conflict = true);
+        collect_saves(&state);
+        assert!(
+            state.with(|i| i.edits["a"].conflict),
+            "unchanged file stays held"
+        );
+        std::fs::write(&path, "---\ntitle: merged\n---\n").unwrap();
+        collect_saves(&state);
+        let s = state.with(|i| i.edits["a"].clone());
+        assert!(!s.conflict);
+        assert_eq!(s.pending.as_deref(), Some("---\ntitle: merged\n---\n"));
     }
 }

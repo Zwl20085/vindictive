@@ -18,7 +18,7 @@ use super::settings::Settings;
 use super::storage::Storage;
 use crate::core::nextup::{next_up, ordered};
 use crate::core::tip::Tip;
-use crate::sync::github::{GithubClient, GithubError};
+use crate::sync::github::GithubClient;
 use crate::sync::weather::Weather;
 
 pub const EVENT_BOARD_UPDATED: &str = "board-updated";
@@ -292,7 +292,9 @@ impl AppState {
         message: &str,
     ) -> Result<Tip, String> {
         let client = self.client()?;
-        // Optimistic local update so the UI reacts immediately.
+        // Optimistic local update so the UI reacts immediately; undone below
+        // if GitHub does not take the write.
+        let previous = self.board().get(&tip.id).cloned();
         self.replace_board(self.board().upsert(tip.clone()));
         self.emit(app);
         match client
@@ -308,18 +310,77 @@ impl AppState {
                 self.emit(app);
                 Ok(saved)
             }
-            Err(GithubError::Conflict { path }) => {
-                let _ = self.sync(app).await;
-                Err(GithubError::Conflict { path }.to_string())
-            }
             Err(e) => {
+                self.roll_back(&tip, previous);
+                self.emit(app);
                 let _ = self.sync(app).await;
                 Err(e.to_string())
             }
         }
     }
 
+    /// Undo an optimistic `upsert` of `attempted` after a failed write, unless
+    /// something newer replaced it meanwhile. Without this an offline Done
+    /// would stay on the board (and in the cache) while GitHub still says open,
+    /// and the unchanged SHA would stop the next sync from correcting it.
+    fn roll_back(&self, attempted: &Tip, previous: Option<Tip>) {
+        let board = self.board();
+        if board.get(&attempted.id) != Some(attempted) {
+            return;
+        }
+        self.replace_board(match previous {
+            Some(tip) => board.upsert(tip),
+            None => board.remove(&attempted.id),
+        });
+    }
+
     pub fn from_app<R: Runtime>(app: &AppHandle<R>) -> tauri::State<'_, AppState> {
         app.state::<AppState>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tip(id: &str, title: &str) -> Tip {
+        let text = format!("---\ntitle: {title}\n---\n");
+        Tip::parse(&format!("tips/{id}.md"), Some("sha1".into()), &text).unwrap()
+    }
+
+    fn state_with(tips: Vec<Tip>) -> (AppState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::load(Storage::new(dir.path().to_path_buf()));
+        state.replace_board(Board::new(tips));
+        (state, dir)
+    }
+
+    #[test]
+    fn failed_write_restores_the_previous_tip() {
+        let before = tip("a", "Open");
+        let (state, _dir) = state_with(vec![before.clone()]);
+        let attempted = tip("a", "Done");
+        state.replace_board(state.board().upsert(attempted.clone()));
+        state.roll_back(&attempted, Some(before.clone()));
+        assert_eq!(state.board().get("a"), Some(&before));
+    }
+
+    #[test]
+    fn failed_create_removes_the_new_tip() {
+        let (state, _dir) = state_with(vec![]);
+        let attempted = tip("new", "New");
+        state.replace_board(state.board().upsert(attempted.clone()));
+        state.roll_back(&attempted, None);
+        assert!(state.board().get("new").is_none());
+    }
+
+    #[test]
+    fn roll_back_keeps_a_newer_version() {
+        let (state, _dir) = state_with(vec![tip("a", "Open")]);
+        let attempted = tip("a", "Done");
+        let newer = tip("a", "Synced meanwhile");
+        state.replace_board(state.board().upsert(newer.clone()));
+        state.roll_back(&attempted, Some(tip("a", "Open")));
+        assert_eq!(state.board().get("a"), Some(&newer));
     }
 }

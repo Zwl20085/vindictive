@@ -104,6 +104,7 @@ pub struct FrontMatter {
 /// A tip as the UI sees it: frontmatter plus resolved timestamps plus where it
 /// lives in the repository.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(into = "TipJson", from = "TipJson")]
 pub struct Tip {
     /// Stable identifier: the file name without `.md`.
     pub id: String,
@@ -123,6 +124,79 @@ pub struct Tip {
     pub remind_at: Vec<NaiveDateTime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snoozed_until_at: Option<NaiveDateTime>,
+}
+
+/// Top-level JSON keys of a `Tip` besides the frontmatter ones.
+const TIP_KEYS: [&str; 8] = [
+    "id",
+    "path",
+    "sha",
+    "body",
+    "due_at",
+    "remind_at",
+    "snoozed_until_at",
+    "shadowed",
+];
+
+/// JSON shape of a `Tip` (IPC and the offline cache). The frontmatter is
+/// flattened into it, so an unknown frontmatter key named like a tip field
+/// (`id: 20240101` from Obsidian, say) would emit that key twice. Such keys
+/// travel in `shadowed` instead and are put back on the way in.
+#[derive(Serialize, Deserialize)]
+struct TipJson {
+    id: String,
+    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sha: Option<String>,
+    #[serde(flatten)]
+    front: FrontMatter,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    shadowed: BTreeMap<String, serde_yaml::Value>,
+    body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    due_at: Option<NaiveDateTime>,
+    #[serde(default)]
+    remind_at: Vec<NaiveDateTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    snoozed_until_at: Option<NaiveDateTime>,
+}
+
+impl From<Tip> for TipJson {
+    fn from(tip: Tip) -> Self {
+        let mut front = tip.front;
+        let (shadowed, extra) = std::mem::take(&mut front.extra)
+            .into_iter()
+            .partition(|(k, _)| TIP_KEYS.contains(&k.as_str()));
+        front.extra = extra;
+        TipJson {
+            id: tip.id,
+            path: tip.path,
+            sha: tip.sha,
+            front,
+            shadowed,
+            body: tip.body,
+            due_at: tip.due_at,
+            remind_at: tip.remind_at,
+            snoozed_until_at: tip.snoozed_until_at,
+        }
+    }
+}
+
+impl From<TipJson> for Tip {
+    fn from(json: TipJson) -> Self {
+        let mut front = json.front;
+        front.extra.extend(json.shadowed);
+        Tip {
+            id: json.id,
+            path: json.path,
+            sha: json.sha,
+            front,
+            body: json.body,
+            due_at: json.due_at,
+            remind_at: json.remind_at,
+            snoozed_until_at: json.snoozed_until_at,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -327,6 +401,27 @@ mod tests {
             Status::Open,
             "original must not be mutated"
         );
+    }
+
+    #[test]
+    fn frontmatter_keys_named_like_tip_fields_survive_json() {
+        let text = "---
+title: Zettel
+id: 20240101
+path: notes/z.md
+---
+body
+";
+        let tip = Tip::parse("tips/zettel.md", Some("abc".into()), text).unwrap();
+        let json = serde_json::to_string(&tip).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["id"], "zettel", "the file id wins in JSON");
+        assert_eq!(value["path"], "tips/zettel.md");
+        let back: Tip = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, tip);
+        let md = back.to_markdown().unwrap();
+        assert!(md.contains("id: 20240101"), "{md}");
+        assert!(md.contains("path: notes/z.md"), "{md}");
     }
 
     #[test]
