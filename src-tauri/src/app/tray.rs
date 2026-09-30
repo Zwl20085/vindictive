@@ -17,7 +17,13 @@ const ID_QUIT: &str = "quit";
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, ID_SHOW, "Show / hide board", true, None::<&str>)?;
     let sync = MenuItem::with_id(app, ID_SYNC, "Sync now", true, None::<&str>)?;
-    let push = MenuItem::with_id(app, ID_PUSH, "Commit & push local edits now", true, None::<&str>)?;
+    let push = MenuItem::with_id(
+        app,
+        ID_PUSH,
+        "Commit & push local edits now",
+        true,
+        None::<&str>,
+    )?;
     let capture = MenuItem::with_id(app, ID_CAPTURE, "Quick capture", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit Vindictive", true, None::<&str>)?;

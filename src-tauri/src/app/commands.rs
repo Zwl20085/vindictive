@@ -86,7 +86,9 @@ pub async fn set_color(
     id: String,
     color: Option<String>,
 ) -> Result<BoardState, String> {
-    let color = color.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    let color = color
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty());
     if let Some(c) = &color {
         if !is_hex_color(c) {
             return Err(format!("{c:?} is not a hex colour like #4A3B6B"));
@@ -108,7 +110,9 @@ pub async fn set_size(
     id: String,
     size: Option<String>,
 ) -> Result<BoardState, String> {
-    let size = size.map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty());
+    let size = size
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty());
     if let Some(s) = &size {
         if !TILE_SIZES.contains(&s.as_str()) {
             return Err(format!("size must be one of {}", TILE_SIZES.join(", ")));
@@ -170,7 +174,11 @@ fn is_hex_color(value: &str) -> bool {
 
 /// Open the tip in the local editor and keep it in sync; returns the file path.
 #[tauri::command]
-pub fn edit_local(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<String, String> {
+pub fn edit_local(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<String, String> {
     editor::open(&app, &state, &id).map(|p| p.display().to_string())
 }
 
@@ -354,7 +362,9 @@ pub async fn fetch_weather(state: State<'_, AppState>) -> Result<Option<Weather>
     if let Some(cached) = state.fresh_weather(&place, now) {
         return Ok(Some(cached));
     }
-    let fetched = weather::fetch(&place, now).await.map_err(|e| e.to_string())?;
+    let fetched = weather::fetch(&place, now)
+        .await
+        .map_err(|e| e.to_string())?;
     state.cache_weather(&place, fetched.clone());
     Ok(Some(fetched))
 }

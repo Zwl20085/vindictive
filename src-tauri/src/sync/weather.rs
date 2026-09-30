@@ -129,16 +129,11 @@ pub fn parse_forecast(
         .get("current")
         .ok_or(WeatherError::Malformed("missing current"))?;
     let num = |key: &str| current.get(key).and_then(|v| v.as_f64());
-    let temperature_c = num("temperature_2m").ok_or(WeatherError::Malformed("missing temperature"))?;
+    let temperature_c =
+        num("temperature_2m").ok_or(WeatherError::Malformed("missing temperature"))?;
     let code = num("weather_code").unwrap_or(0.0) as u16;
     let is_day = num("is_day").map(|v| v >= 1.0).unwrap_or(true);
-    let daily = |key: &str| {
-        json.get("daily")?
-            .get(key)?
-            .as_array()?
-            .first()?
-            .as_f64()
-    };
+    let daily = |key: &str| json.get("daily")?.get(key)?.as_array()?.first()?.as_f64();
     Ok(Weather {
         location: name.to_string(),
         temperature_c,
