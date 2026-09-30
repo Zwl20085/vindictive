@@ -5,13 +5,14 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Manager};
 
 use super::state::AppState;
-use super::{editor, windows};
+use super::{editor, updater, windows};
 
 const ID_SHOW: &str = "show";
 const ID_SYNC: &str = "sync";
 const ID_PUSH: &str = "push";
 const ID_CAPTURE: &str = "capture";
 const ID_SETTINGS: &str = "settings";
+const ID_UPDATE: &str = "update";
 const ID_QUIT: &str = "quit";
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
@@ -26,6 +27,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let capture = MenuItem::with_id(app, ID_CAPTURE, "Quick capture", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, ID_SETTINGS, "Settings…", true, None::<&str>)?;
+    let update = MenuItem::with_id(app, ID_UPDATE, "Check for updates…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit Vindictive", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -36,6 +38,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             &capture,
             &settings,
             &PredefinedMenuItem::separator(app)?,
+            &update,
             &quit,
         ],
     )?;
@@ -87,6 +90,10 @@ fn on_menu(app: &AppHandle, id: &str) {
                 let n = editor::push_pending(&app, &state).await;
                 log::info!("manual push: {n} file(s)");
             });
+            Ok(())
+        }
+        ID_UPDATE => {
+            updater::check_and_install(app);
             Ok(())
         }
         ID_QUIT => {

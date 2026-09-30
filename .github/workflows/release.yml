@@ -33,9 +33,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the installer so the in-app updater accepts it.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Vindictive ${{ github.ref_name }}"
-          releaseBody: "Windows installer (.msi and .exe). See the README for setup."
+          releaseBody: "Windows installer (.msi and .exe). Installed copies update themselves from the tray: right-click > Check for updates. See the README for setup."
           releaseDraft: false
           prerelease: false
+          includeUpdaterJson: true

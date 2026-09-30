@@ -103,6 +103,11 @@ and run it. Windows 10 21H2 or later with WebView2 (built into Windows 11).
 The installer is not code-signed yet, so Windows SmartScreen may say
 *Windows protected your PC*. Click **More info → Run anyway**.
 
+**Updating.** From 0.3.0 on, right-click the tray icon → **Check for
+updates…**. Vindictive pushes any unsaved edits, downloads the newest signed
+installer from Releases, installs it and restarts. Copies older than 0.3.0 need
+one manual install of the new `setup.exe`.
+
 ### 2. Connect a tips repo (two minutes)
 
 On first launch the board is empty and shows **Set up GitHub sync**. Click it:

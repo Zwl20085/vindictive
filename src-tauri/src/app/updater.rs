@@ -1,0 +1,68 @@
+//! Self-update from the latest GitHub release.
+//!
+//! The release workflow publishes a signed installer plus `latest.json`; the
+//! updater plugin compares versions, checks the signature against the public
+//! key in `tauri.conf.json`, runs the installer and the app restarts.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use tauri::{AppHandle, Manager};
+use tauri_plugin_updater::UpdaterExt;
+
+use super::state::AppState;
+use super::{editor, notify};
+
+/// Set while a check or install runs, so repeated clicks do nothing.
+static BUSY: AtomicBool = AtomicBool::new(false);
+
+/// Check GitHub for a newer release and, if there is one, install it and
+/// restart. Every outcome is reported with a toast.
+pub fn check_and_install(app: &AppHandle) {
+    if BUSY.swap(true, Ordering::SeqCst) {
+        notify::show(app, "Vindictive", "Already checking for updates…");
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = run(&app).await {
+            log::warn!("update: {e}");
+            notify::show(&app, "Update failed", &e);
+        }
+        BUSY.store(false, Ordering::SeqCst);
+    });
+}
+
+async fn run(app: &AppHandle) -> Result<(), String> {
+    let current = app.package_info().version.to_string();
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| format!("could not reach GitHub: {e}"))?;
+    let Some(update) = update else {
+        notify::show(
+            app,
+            "Vindictive is up to date",
+            &format!("Version {current}"),
+        );
+        return Ok(());
+    };
+    notify::show(
+        app,
+        "Updating Vindictive",
+        &format!(
+            "Downloading {} (you have {current}); the app restarts when done.",
+            update.version
+        ),
+    );
+    // The installer closes the app; get local edits onto GitHub first.
+    let state = app.state::<AppState>();
+    let pushed = editor::push_pending(app, &state).await;
+    log::info!("update: pushed {pushed} pending file(s) before install");
+    update
+        .download_and_install(|_, _| {}, || log::info!("update: download finished"))
+        .await
+        .map_err(|e| format!("install failed: {e}"))?;
+    app.restart();
+}
