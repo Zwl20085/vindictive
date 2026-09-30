@@ -54,6 +54,9 @@ pub struct Settings {
     pub hotkey: String,
     pub dock: Dock,
     pub always_on_top: bool,
+    /// Keep the board beneath every other window (desktop widget style).
+    /// Mutually exclusive with `always_on_top`.
+    pub always_on_bottom: bool,
     pub autostart: bool,
     pub notify_new_tips: bool,
     pub theme: Theme,
@@ -87,6 +90,7 @@ impl Default for Settings {
             hotkey: "Ctrl+Shift+Space".into(),
             dock: Dock::Right,
             always_on_top: false,
+            always_on_bottom: false,
             autostart: false,
             notify_new_tips: true,
             theme: Theme::Dark,
@@ -158,6 +162,9 @@ impl Settings {
             return Err(format!(
                 "window opacity must be between {MIN_WINDOW_OPACITY} and {MAX_WINDOW_OPACITY} percent"
             ));
+        }
+        if s.always_on_top && s.always_on_bottom {
+            return Err("always on top and always on bottom cannot both be on".into());
         }
         if s.push_interval_minutes > MAX_PUSH_INTERVAL_MINUTES {
             return Err(format!(
@@ -265,6 +272,7 @@ mod tests {
         assert_eq!(s.push_interval_minutes, 60);
         assert!(s.fit_height);
         assert!(!s.always_on_top);
+        assert!(!s.always_on_bottom);
         assert_eq!(s.window_opacity, 100);
         let dim = Settings {
             window_opacity: 5,
@@ -274,6 +282,26 @@ mod tests {
         assert!(s.weather_location.is_empty());
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn top_and_bottom_are_exclusive() {
+        let both = Settings {
+            always_on_top: true,
+            always_on_bottom: true,
+            ..Default::default()
+        };
+        assert!(both.validated().is_err());
+        let bottom = Settings {
+            always_on_bottom: true,
+            ..Default::default()
+        }
+        .validated()
+        .unwrap();
+        assert!(bottom.always_on_bottom);
+        assert!(!bottom.always_on_top);
+        let parsed: Settings = serde_json::from_str(r#"{"always_on_bottom":true}"#).unwrap();
+        assert!(parsed.always_on_bottom);
     }
 
     #[test]

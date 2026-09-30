@@ -172,8 +172,8 @@ The whole board flips to a single detail panel in the tile's colour:
 - Settings is an overlay in the same window, in three groups: GitHub (owner,
   repo, branch, dir, token in Windows Credential Manager, poll interval);
   appearance (language, theme, columns, weather city, panel, show done);
-  window (hotkey, dock, always on top (off by default), autostart, notify on
-  new tips).
+  window (hotkey, dock, always on top / always on bottom (both off by
+  default, mutually exclusive), autostart, notify on new tips).
 
 ### Capture window
 

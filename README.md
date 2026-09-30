@@ -69,7 +69,8 @@ date / weather panel sits on top, and the whole UI is in English or 简体中文
 - **Half the desktop.** A frameless board of Windows 8 style live tiles that
   opens at half the work area width, full height, docked to a screen edge.
   Drag it by its 20 px strip, dock it left or right, or tick **Always on top**
-  in Settings (off by default) to keep it above every window.
+  in Settings (off by default) to keep it above every window, or **Always on
+  bottom** to keep it beneath everything like a desktop widget.
 - **One thing is next.** Exactly one tile gets the orange edge and the `NEXT`
   chip. The choice is a fixed, explainable score, not a feed.
 - **Deadline countdown.** `3w`, `5d`, `2d 4h`, `45m`, `overdue 2h`. Colour

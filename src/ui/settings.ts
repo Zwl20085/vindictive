@@ -67,6 +67,9 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   if (!DOCKS.includes(dock)) throw new Error('invalid dock');
   if (!THEMES.includes(theme)) throw new Error('invalid theme');
   if (!isLanguage(language)) throw new Error('invalid language');
+  const alwaysOnTop = bool('always_on_top');
+  const alwaysOnBottom = bool('always_on_bottom');
+  if (alwaysOnTop && alwaysOnBottom) throw new Error(t('layerConflict'));
   return {
     ...base,
     owner,
@@ -85,7 +88,8 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
     fit_height: bool('fit_height'),
     window_opacity: Math.min(MAX_WINDOW_OPACITY, Math.max(MIN_WINDOW_OPACITY, Math.round(Number(str('window_opacity')) || MAX_WINDOW_OPACITY))),
     show_panel: bool('show_panel'),
-    always_on_top: bool('always_on_top'),
+    always_on_top: alwaysOnTop,
+    always_on_bottom: alwaysOnBottom,
     autostart: bool('autostart'),
     notify_new_tips: bool('notify_new_tips'),
     show_done: bool('show_done'),
@@ -138,6 +142,20 @@ function setupLinks(owner: string, actions: SettingsActions): HTMLElement {
   );
 }
 
+/** Ticking either checkbox clears the other, so the pair can never both be on. */
+function exclusiveChecks(form: HTMLFormElement, a: keyof Settings, b: keyof Settings): void {
+  const box = (name: string): HTMLInputElement | null => form.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+  const first = box(a);
+  const second = box(b);
+  if (!first || !second) return;
+  const link = (self: HTMLInputElement, other: HTMLInputElement): void =>
+    self.addEventListener('change', () => {
+      if (self.checked) other.checked = false;
+    });
+  link(first, second);
+  link(second, first);
+}
+
 function group(title: string, ...children: (HTMLElement | null)[]): HTMLElement {
   return el('fieldset', { className: 'set-group' }, el('legend', { className: 'set-group-title', text: title }), ...children);
 }
@@ -178,6 +196,7 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
       field(t('pushInterval'), 'push_interval_minutes', text('push_interval_minutes', String(s.push_interval_minutes), 'number', { min: '0' })),
       field(t('dock'), 'dock', select('dock', s.dock, DOCKS)),
       check('always_on_top', s.always_on_top, t('alwaysOnTop')),
+      check('always_on_bottom', s.always_on_bottom, t('alwaysOnBottom')),
       check('autostart', s.autostart, t('autostart')),
       check('notify_new_tips', s.notify_new_tips, t('notifyNew')),
     ),
@@ -203,5 +222,6 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
     })();
   });
   form.querySelector<HTMLButtonElement>('[data-role="back"]')?.addEventListener('click', actions.onClose);
+  exclusiveChecks(form, 'always_on_top', 'always_on_bottom');
   return form;
 }

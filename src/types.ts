@@ -76,6 +76,8 @@ export interface Settings {
   hotkey: string;
   dock: Dock;
   always_on_top: boolean;
+  /** Keep the board beneath every other window; exclusive with always_on_top. */
+  always_on_bottom: boolean;
   autostart: boolean;
   notify_new_tips: boolean;
   theme: Theme;

@@ -24,6 +24,7 @@ export const SAMPLE_SETTINGS: Settings = {
   hotkey: 'Ctrl+Shift+Space',
   dock: 'right',
   always_on_top: false,
+  always_on_bottom: false,
   autostart: false,
   notify_new_tips: true,
   theme: (['dark', 'light', 'nerv', 'cobalt', 'paper'] as const).find((x) => x === query.get('theme')) ?? 'dark',

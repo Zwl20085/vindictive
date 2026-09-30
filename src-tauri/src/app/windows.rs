@@ -176,6 +176,26 @@ pub fn apply_autostart(app: &AppHandle, enabled: bool) {
     }
 }
 
+/// One window-layer flag: its log name and the setter that applies it.
+type LayerStep = (&'static str, fn(&WebviewWindow, bool) -> tauri::Result<()>);
+const TOP: LayerStep = ("always on top", WebviewWindow::set_always_on_top);
+const BOTTOM: LayerStep = ("always on bottom", WebviewWindow::set_always_on_bottom);
+
+/// Pin the board above or below every other window, or neither. The flag
+/// being switched off is cleared first so the OS never sees both at once.
+fn apply_layer(w: &WebviewWindow, top: bool, bottom: bool) {
+    let order = if top {
+        [(BOTTOM, false), (TOP, true)]
+    } else {
+        [(TOP, false), (BOTTOM, bottom)]
+    };
+    for ((name, set), on) in order {
+        if let Err(e) = set(w, on) {
+            log::warn!("{name} failed: {e}");
+        }
+    }
+}
+
 /// React to a settings change. Errors are logged, never fatal.
 pub fn apply_settings(app: &AppHandle, previous: &Settings, next: &Settings) {
     if previous.hotkey != next.hotkey {
@@ -186,11 +206,11 @@ pub fn apply_settings(app: &AppHandle, previous: &Settings, next: &Settings) {
     if previous.autostart != next.autostart {
         apply_autostart(app, next.autostart);
     }
-    if previous.always_on_top != next.always_on_top {
+    if previous.always_on_top != next.always_on_top
+        || previous.always_on_bottom != next.always_on_bottom
+    {
         if let Ok(w) = window(app, MAIN) {
-            if let Err(e) = w.set_always_on_top(next.always_on_top) {
-                log::warn!("always on top failed: {e}");
-            }
+            apply_layer(&w, next.always_on_top, next.always_on_bottom);
         }
     }
     if previous.dock != next.dock {
@@ -207,7 +227,7 @@ pub fn apply_initial(app: &AppHandle, settings: &Settings) {
     }
     apply_autostart(app, settings.autostart);
     if let Ok(w) = window(app, MAIN) {
-        let _ = w.set_always_on_top(settings.always_on_top);
+        apply_layer(&w, settings.always_on_top, settings.always_on_bottom);
     }
     if let Err(e) = size_main_half(app) {
         log::warn!("half-screen size failed: {e}");
