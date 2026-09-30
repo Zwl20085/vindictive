@@ -187,6 +187,7 @@ export class App {
         onOpen: (id) => this.store.set({ view: { kind: 'detail', id } }),
         onMenu: (id, x, y) => this.tileMenu(id, x, y),
         onAdd: () => this.store.set({ adding: true }),
+        onSetup: () => this.store.set({ view: { kind: 'settings' } }),
         onReorder: (id, order) => void this.mutate(() => call('set_order', { id, order }), 'set_order'),
       }),
     );
@@ -310,6 +311,7 @@ export class App {
         await this.refresh('get_state');
       },
       onTest: () => call('test_connection'),
+      onOpenLink: (url: string) => void guard('open link', () => openExternal(url)),
       onClose: () => this.back_(),
     };
   }

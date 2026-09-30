@@ -93,35 +93,65 @@ date / weather panel sits on top, and the whole UI is in English or 简体中文
 
 ## Quick start
 
-### Download
+### 1. Install
 
-Grab the latest `.msi` or `.exe` from
-[Releases](https://github.com/Zwl20085/vindictive/releases/latest), install,
-and run. Windows 10 21H2 or later with WebView2 (built into Windows 11).
+Grab the latest `Vindictive_x.y.z_x64-setup.exe` (per-user, no admin) or
+`.msi` from [Releases](https://github.com/Zwl20085/vindictive/releases/latest)
+and run it. Windows 10 21H2 or later with WebView2 (built into Windows 11).
 
-### Build from source
+The installer is not code-signed yet, so Windows SmartScreen may say
+*Windows protected your PC*. Click **More info → Run anyway**.
 
-Prerequisites: [Rust stable](https://rustup.rs), Node 18 or later, and the
-[WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
-(already present on Windows 11).
+### 2. Connect a tips repo (two minutes)
+
+On first launch the board is empty and shows **Set up GitHub sync**. Click it:
+
+1. **Create repo ↗** opens GitHub's new-repository page pre-filled as a
+   private `vindictive-tips`. Tick *Add a README file* so the repo has a
+   branch, then **Create repository**.
+2. **Create token ↗** opens GitHub's fine-grained token page pre-filled with
+   *Contents: Read and write*. Under *Repository access* pick
+   `vindictive-tips`, then **Generate token** and copy it.
+3. Paste the repo URL (for example `https://github.com/you/vindictive-tips`)
+   into **Owner**, paste the token, press **Save token** and then **Save**.
+
+That's the whole setup. The `tips/` folder is created by your first tip; press
+`Ctrl+Shift+Space` anywhere and type one. For a starter set, copy
+[`examples/tips/`](examples/tips) into the repo. Details and troubleshooting:
+[docs/SETUP.md](docs/SETUP.md).
+
+### Try it without installing anything
+
+The frontend runs in a plain browser against an in-memory backend with sample
+tips, so you can see the board before you install Rust or create a repo:
 
 ```sh
 git clone https://github.com/Zwl20085/vindictive.git
 cd vindictive
 npm install
-npm run tauri dev      # run with hot reload
-npm run tauri build    # produce src-tauri/target/release/bundle/
+npm run dev            # open http://localhost:1420
 ```
 
-## Set up your tips repo
+### Build from source
 
-1. Create a **private** repository, e.g. `vindictive-tips`, with a `tips/`
-   folder. The [`examples/tips/`](examples/tips) folder is a ready starter set.
-2. Create a **fine-grained personal access token** limited to that one repo
-   with *Contents: Read and write*. Step-by-step with screenshots-in-words:
-   [docs/SETUP.md](docs/SETUP.md).
-3. In the app, right-click the top strip → **Settings**, enter owner, repo,
-   branch, dir, paste the token, **Test connection**.
+Prerequisites:
+
+- [Rust stable](https://rustup.rs) (1.80 or later)
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+  with the *Desktop development with C++* workload (the Rust MSVC toolchain
+  needs its linker)
+- Node 18 or later
+- [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+  (already present on Windows 11)
+
+```sh
+npm install
+npm start              # the real app with hot reload (same as npm run tauri dev)
+npm run tauri build    # installers in src-tauri/target/release/bundle/
+```
+
+The first Rust build compiles every dependency and takes a few minutes; later
+builds are incremental.
 
 ## Tip format
 
@@ -169,7 +199,7 @@ Full reference: [docs/TIP-FORMAT.md](docs/TIP-FORMAT.md).
 | ----- | ------- |
 | `#tag` | add a tag, repeatable |
 | `!high` `!low` | priority |
-| `@today` `@tomorrow` `@nextweek` `@2026-10-15` | due date; optional `HH:MM` after it |
+| `@today` `@tomorrow` `@nextweek` `@2026-10-15` | due date, 23:59 unless `HH:MM` follows |
 | `^location` | location, quote for spaces: `^"Lab 302"` |
 | `>task` `>deadline` `>note` `>reading` `>event` | kind |
 | arXiv id, arXiv URL, DOI | becomes a reading tip and fetches metadata |

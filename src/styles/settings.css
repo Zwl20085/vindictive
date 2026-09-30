@@ -116,3 +116,15 @@
 .set-status[data-state='error'] {
   color: var(--error);
 }
+
+.set-setup {
+  display: grid;
+  gap: 6px;
+}
+
+.set-hint {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}

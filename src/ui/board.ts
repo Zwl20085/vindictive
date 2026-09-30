@@ -1,4 +1,5 @@
 import type { BoardState, Tip } from '../types';
+import { isConfigured } from '../lib/github';
 import { t } from '../lib/i18n';
 import type { ImageResolver } from '../lib/markdown';
 import { applyManualOrder, orderForMove } from '../lib/order';
@@ -17,6 +18,8 @@ export interface BoardOptions {
   onMenu?: (id: string, x: number, y: number) => void;
   /** Click on the trailing "+" tile. When absent, no add tile is rendered. */
   onAdd?: () => void;
+  /** Open Settings from the first-run message. */
+  onSetup?: () => void;
   /** A tile was dropped somewhere else: persist its new `order`. */
   onReorder?: (id: string, order: number) => void;
   /**
@@ -115,21 +118,25 @@ function addTile(onAdd: () => void): HTMLButtonElement {
   return button;
 }
 
-function emptyMessage(state: BoardState): HTMLElement {
-  const text = state.has_token ? t('emptyWithToken') : t('emptyNoToken');
-  return el('p', { className: 'board-empty', text });
+function emptyMessage(state: BoardState, onSetup?: () => void): HTMLElement {
+  const ready = state.has_token && isConfigured(state.settings);
+  if (ready || !onSetup) return el('p', { className: 'board-empty', text: ready ? t('emptyWithToken') : t('emptyNoToken') });
+  const button = el('button', { type: 'button', className: 'action action-primary', text: t('setUpSync') });
+  button.addEventListener('click', onSetup);
+  return el('div', { className: 'board-empty' }, el('p', { text: t('emptyNoToken') }), button);
 }
 
 /** Render the tile grid into a fresh element. */
 export function renderBoard(options: BoardOptions): HTMLElement {
-  const { state, now, onOpen, onMenu, onAdd, onReorder, seen, resolveImage } = options;
+  const { state, now, onOpen, onMenu, onAdd, onSetup, onReorder, seen, resolveImage } = options;
   const columns = clampColumns(state.settings.columns);
   const grid = el('div', { className: 'board', role: 'list' });
   grid.style.setProperty('--cols', String(columns));
 
   const tips = visibleTips(state, now);
   if (tips.length === 0) {
-    mount(grid, emptyMessage(state), onAdd ? addTile(onAdd) : null);
+    const ready = state.has_token && isConfigured(state.settings);
+    mount(grid, emptyMessage(state, onSetup), onAdd && ready ? addTile(onAdd) : null);
     return grid;
   }
   let entering = 0;

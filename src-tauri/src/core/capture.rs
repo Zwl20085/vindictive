@@ -18,7 +18,9 @@ use regex::Regex;
 use super::timeparse::{format_dt, parse_datetime};
 use super::tip::{FrontMatter, Kind, Priority};
 
-const DEFAULT_CAPTURE_TIME: (u32, u32) = (9, 0);
+/// A captured date without a time means end of day, like a bare `due` date in
+/// a tip file; `@today` typed in the afternoon must not be born overdue.
+const DEFAULT_CAPTURE_TIME: (u32, u32) = (23, 59);
 
 pub fn parse(input: &str, now: NaiveDateTime) -> Option<FrontMatter> {
     let tokens = tokenize(input);
@@ -227,5 +229,16 @@ mod tests {
         );
         assert_eq!(arxiv_id("https://example.org/2401.12345"), None);
         assert_eq!(arxiv_id("1234.5"), None);
+    }
+
+    #[test]
+    fn bare_capture_date_means_end_of_day() {
+        let afternoon = dt("2026-10-02 15:00");
+        let f = parse("Call supplier @today", afternoon).unwrap();
+        assert_eq!(f.due.as_deref(), Some("2026-10-02 23:59"));
+        let f = parse("Submit @2026-10-15", afternoon).unwrap();
+        assert_eq!(f.due.as_deref(), Some("2026-10-15 23:59"));
+        let f = parse("Standup @tomorrow 09:30", afternoon).unwrap();
+        assert_eq!(f.due.as_deref(), Some("2026-10-03 09:30"));
     }
 }

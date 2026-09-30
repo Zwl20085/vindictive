@@ -1,5 +1,6 @@
 import type { Dock, Language, Settings, Theme } from '../types';
 import { isLanguage, LOCALES, t, type StringKey } from '../lib/i18n';
+import { newRepoUrl, newTokenUrl, parseRepoInput } from '../lib/github';
 import { clampColumns, MAX_COLUMNS, MIN_COLUMNS } from './board';
 import { el } from './dom';
 
@@ -13,6 +14,7 @@ export interface SettingsActions {
   onSetToken: (token: string) => Promise<void>;
   onClearToken: () => Promise<void>;
   onTest: () => Promise<string>;
+  onOpenLink: (url: string) => void;
   onClose: () => void;
 }
 
@@ -56,15 +58,19 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   const dock = str('dock') as Dock;
   const theme = str('theme') as Theme;
   const language = str('language');
-  if (!str('owner') || !str('repo')) throw new Error('owner and repo are required');
+  // A pasted `owner/repo` or GitHub URL in either field fills both.
+  const pasted = parseRepoInput(str('owner')) ?? parseRepoInput(str('repo'));
+  const owner = pasted?.owner ?? str('owner');
+  const repo = pasted?.repo ?? str('repo');
+  if (Boolean(owner) !== Boolean(repo)) throw new Error(t('ownerRepoBoth'));
   if (!Number.isFinite(poll) || poll < MIN_POLL_SECONDS) throw new Error(`poll interval must be at least ${MIN_POLL_SECONDS} s`);
   if (!DOCKS.includes(dock)) throw new Error('invalid dock');
   if (!THEMES.includes(theme)) throw new Error('invalid theme');
   if (!isLanguage(language)) throw new Error('invalid language');
   return {
     ...base,
-    owner: str('owner'),
-    repo: str('repo'),
+    owner,
+    repo,
     branch: str('branch') || 'main',
     dir: str('dir').replace(/^\/+|\/+$/g, ''),
     poll_seconds: Math.round(poll),
@@ -117,6 +123,21 @@ function tokenSection(hasToken: boolean, actions: SettingsActions, status: HTMLE
   return el('section', { className: 'set-token' }, field(t('githubToken'), 'token', input), el('div', { className: 'set-row' }, save, clearBtn, test));
 }
 
+/** Two pre-filled GitHub pages that cover the whole first-time setup. */
+function setupLinks(owner: string, actions: SettingsActions): HTMLElement {
+  const link = (label: string, url: string): HTMLElement => {
+    const button = el('button', { type: 'button', className: 'action', text: `${label} ↗` });
+    button.addEventListener('click', () => actions.onOpenLink(url));
+    return button;
+  };
+  return el(
+    'div',
+    { className: 'set-setup' },
+    el('p', { className: 'set-hint', text: t('setupHint') }),
+    el('div', { className: 'set-row' }, link(t('setupRepo'), newRepoUrl()), link(t('setupToken'), newTokenUrl(owner))),
+  );
+}
+
 function group(title: string, ...children: (HTMLElement | null)[]): HTMLElement {
   return el('fieldset', { className: 'set-group' }, el('legend', { className: 'set-group-title', text: title }), ...children);
 }
@@ -131,8 +152,9 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
     el('h1', { className: 'set-title', text: t('settings') }),
     group(
       'GitHub',
-      field(t('owner'), 'owner', text('owner', s.owner)),
-      field(t('repo'), 'repo', text('repo', s.repo)),
+      setupLinks(s.owner, actions),
+      field(t('owner'), 'owner', text('owner', s.owner, 'text', { placeholder: 'owner  or  https://github.com/owner/repo' })),
+      field(t('repo'), 'repo', text('repo', s.repo, 'text', { placeholder: 'vindictive-tips' })),
       field(t('branch'), 'branch', text('branch', s.branch)),
       field(t('directory'), 'dir', text('dir', s.dir)),
       tokenSection(hasToken, actions, status),

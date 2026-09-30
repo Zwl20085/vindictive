@@ -283,12 +283,21 @@ pub async fn test_connection(state: State<'_, AppState>) -> Result<String, Strin
     let client = state.client()?;
     let settings = state.settings();
     let dir = validate_dir(&settings.dir).map_err(|e| e.to_string())?;
-    let files = client.list_dir(&dir).await.map_err(|e| e.to_string())?;
+    let files = client
+        .list_dir_or_empty(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
     let count = files
         .iter()
         .filter(|f| f.kind == "file" && f.name.ends_with(".md"))
         .count();
     let repo = client.repo();
+    if files.is_empty() {
+        return Ok(format!(
+            "OK: {}/{} is reachable. No tips in {}/ yet; your first tip creates it.",
+            repo.owner, repo.repo, settings.dir
+        ));
+    }
     Ok(format!(
         "OK: {count} tips in {}/{}/{}",
         repo.owner, repo.repo, settings.dir

@@ -113,6 +113,43 @@ impl GithubClient {
         Ok(res.json::<Vec<RemoteFile>>().await?)
     }
 
+    /// Like `list_dir`, but a tips directory that does not exist yet on a
+    /// reachable branch counts as empty: GitHub creates it with the first
+    /// tip, so a brand-new repository works without a manual first commit.
+    pub async fn list_dir_or_empty(&self, dir: &str) -> Result<Vec<RemoteFile>> {
+        match self.list_dir(dir).await {
+            Err(GithubError::NotFound(what)) => {
+                if self.branch_exists().await? {
+                    Ok(Vec::new())
+                } else {
+                    Err(GithubError::NotFound(what))
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// True when the configured branch exists and the token can see it.
+    async fn branch_exists(&self) -> Result<bool> {
+        let url = format!(
+            "{API_ROOT}/repos/{}/{}/branches/{}",
+            self.repo.owner,
+            self.repo.repo,
+            encode_segment(&self.repo.branch)
+        );
+        let res = self
+            .http
+            .get(&url)
+            .header(ACCEPT, "application/vnd.github+json")
+            .send()
+            .await?;
+        if res.status() == StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        check(res, &self.repo.branch).await?;
+        Ok(true)
+    }
+
     /// Fetch a text file and its blob SHA.
     pub async fn get_text(&self, path: &str) -> Result<(String, String)> {
         let url = contents_url(&self.repo, path);

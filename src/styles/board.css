@@ -65,11 +65,18 @@
 
 .board-empty {
   grid-column: 1 / -1;
+  display: grid;
+  gap: var(--pad);
+  justify-items: start;
   margin: 0;
   padding: var(--pad);
   color: var(--fg-muted);
   font-weight: 300;
   font-size: clamp(13px, 4.4vw, 17px);
+}
+
+.board-empty p {
+  margin: 0;
 }
 
 /* Inline "new tip" bar above the grid. */

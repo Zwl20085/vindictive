@@ -249,7 +249,10 @@ impl AppState {
     async fn sync_inner(&self) -> Result<Vec<String>, String> {
         let client = self.client()?;
         let (dir, board) = self.with(|i| (i.settings.dir.clone(), i.board.clone()));
-        let listing = client.list_dir(&dir).await.map_err(|e| e.to_string())?;
+        let listing = client
+            .list_dir_or_empty(&dir)
+            .await
+            .map_err(|e| e.to_string())?;
         let plan = board.plan(&listing);
         let mut fetched = Vec::with_capacity(plan.to_fetch.len());
         for path in &plan.to_fetch {

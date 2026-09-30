@@ -197,15 +197,17 @@ impl Tip {
         }
     }
 
-    /// Mark done at `now`. Recurring tips roll forward instead of closing.
+    /// Mark done at `now`. Recurring tips roll forward instead of closing:
+    /// past the current due date, so finishing early still advances it.
     pub fn complete(&self, now: NaiveDateTime) -> Tip {
         let mut front = self.front.clone();
         front.snoozed_until = None;
         front.done_at = Some(format_dt(now));
+        let after = self.due_at.map_or(now, |due| due.max(now));
         let rolled = front
             .repeat
             .as_deref()
-            .and_then(|rule| super::recur::next_occurrence(rule, now));
+            .and_then(|rule| super::recur::next_occurrence(rule, after));
         match rolled {
             Some(next_due) => {
                 let shift = self.due_at.map(|d| next_due - d);
@@ -335,6 +337,9 @@ mod tests {
         assert_eq!(done.front.status, Status::Open);
         assert_eq!(done.due_at, Some(dt("2026-10-12 10:00")));
         assert_eq!(done.remind_at, vec![dt("2026-10-12 09:30")]);
+        // Done before the meeting (Sunday evening) still moves to next week.
+        let early = tip.complete(dt("2026-10-04 20:00"));
+        assert_eq!(early.due_at, Some(dt("2026-10-12 10:00")));
     }
 
     #[test]
