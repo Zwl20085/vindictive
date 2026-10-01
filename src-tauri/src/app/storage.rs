@@ -28,7 +28,9 @@ impl Storage {
     }
 
     pub fn load_settings(&self) -> Settings {
-        self.read(SETTINGS_FILE).unwrap_or_default()
+        self.read::<Settings>(SETTINGS_FILE)
+            .unwrap_or_default()
+            .repaired()
     }
 
     pub fn save_settings(&self, s: &Settings) -> Result<(), String> {

@@ -1,6 +1,6 @@
 [package]
 name = "vindictive"
-version = "0.3.0"
+version = "0.3.1"
 description = "Always-on-top tile board of what to do next, kept as Markdown files in a folder you choose."
 authors = ["Wentao Zhang"]
 license = "MIT"

@@ -1,5 +1,6 @@
 /**
- * The status panel above the board: clock, date and weather. Owns one
+ * The status panel above the board: clock, date and weather, with Clawd
+ * pacing between them. Owns one
  * element and updates it in place, so the clock can tick every second
  * without re-rendering the board.
  */
@@ -7,6 +8,7 @@ import type { Language, Weather } from '../types';
 import { formatPanelDate, t } from '../lib/i18n';
 import { formatClock } from '../lib/time';
 import { formatTemperature, weatherLook } from '../lib/weather';
+import { Clawd } from './clawd';
 import { el } from './dom';
 
 export type WeatherStatus = 'off' | 'loading' | 'ok' | 'error';
@@ -29,6 +31,7 @@ export class Panel {
   private readonly temp = el('span', { className: 'panel-temp' });
   private readonly place = el('span', { className: 'panel-place' });
   private readonly detail = el('span', { className: 'panel-weather-detail' });
+  private readonly clawd = new Clawd();
   private language: Language = 'en';
   private timer: ReturnType<typeof setInterval> | undefined;
 
@@ -37,6 +40,7 @@ export class Panel {
       'section',
       { className: 'panel', 'aria-label': 'clock and weather', 'data-tauri-drag-region': true },
       el('div', { className: 'panel-time' }, el('span', { className: 'panel-clock' }, this.hm, this.sec), this.date),
+      this.clawd.element,
       el('div', { className: 'panel-weather' }, el('span', { className: 'panel-now' }, this.glyph, this.temp, this.place), this.detail),
     );
     this.tick();
@@ -57,6 +61,7 @@ export class Panel {
     this.hm.textContent = formatClock(now);
     this.sec.textContent = String(now.getSeconds()).padStart(2, '0');
     this.date.textContent = formatPanelDate(now, this.language);
+    this.clawd.update(now);
   }
 
   update(data: PanelData): void {

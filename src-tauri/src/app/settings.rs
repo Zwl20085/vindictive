@@ -79,23 +79,36 @@ impl Default for Settings {
             hotkey: "Ctrl+Shift+Space".into(),
             dock: Dock::Right,
             always_on_top: false,
-            always_on_bottom: false,
-            autostart: false,
+            always_on_bottom: true,
+            autostart: true,
             notify_new_tips: true,
             theme: Theme::Dark,
             columns: 4,
             show_done: false,
             language: Language::En,
-            weather_location: String::new(),
+            weather_location: "Nottingham".into(),
             show_panel: true,
             editor_command: "code".into(),
             fit_height: true,
-            window_opacity: 100,
+            window_opacity: 50,
         }
     }
 }
 
 impl Settings {
+    /// Settings written before "always on bottom" existed (or by hand) may
+    /// ask for both layers; "on top" was the explicit choice, so it wins.
+    pub fn repaired(self) -> Settings {
+        if self.always_on_top && self.always_on_bottom {
+            Settings {
+                always_on_bottom: false,
+                ..self
+            }
+        } else {
+            self
+        }
+    }
+
     /// True once a tips folder is set.
     pub fn is_configured(&self) -> bool {
         !self.folder.trim().is_empty()
@@ -217,14 +230,15 @@ mod tests {
         assert_eq!(s.editor_command, "code");
         assert!(s.fit_height);
         assert!(!s.always_on_top);
-        assert!(!s.always_on_bottom);
-        assert_eq!(s.window_opacity, 100);
+        assert!(s.always_on_bottom);
+        assert!(s.autostart);
+        assert_eq!(s.window_opacity, 50);
         let dim = Settings {
             window_opacity: 5,
             ..Default::default()
         };
         assert!(dim.validated().is_err());
-        assert!(s.weather_location.is_empty());
+        assert_eq!(s.weather_location, "Nottingham");
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
     }
@@ -237,14 +251,15 @@ mod tests {
             ..Default::default()
         };
         assert!(both.validated().is_err());
-        let bottom = Settings {
-            always_on_bottom: true,
-            ..Default::default()
-        }
-        .validated()
-        .unwrap();
-        assert!(bottom.always_on_bottom);
+        let bottom = Settings::default().validated().unwrap();
+        assert!(bottom.always_on_bottom, "on bottom by default");
         assert!(!bottom.always_on_top);
+        // An old file that only says "on top" gets the new default too, and
+        // is repaired rather than left invalid.
+        let old: Settings = serde_json::from_str(r#"{"always_on_top":true}"#).unwrap();
+        let fixed = old.repaired();
+        assert!(fixed.always_on_top && !fixed.always_on_bottom);
+        assert!(fixed.validated().is_ok());
         let parsed: Settings = serde_json::from_str(r#"{"always_on_bottom":true}"#).unwrap();
         assert!(parsed.always_on_bottom);
     }

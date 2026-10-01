@@ -126,7 +126,10 @@ The whole board flips to a single detail panel in the tile's colour:
 - **Panel** (a flat surface block, draggable, `show_panel` setting): clock
   `HH:MM` with small seconds, date line (`2026-09-28 MON` / `2026年9月28日
   周一`), and weather on the right: glyph, temperature, place, high/low and
-  description.
+  description. Between them **Clawd**, a 16×11 pixel-art companion drawn as
+  inline SVG, paces back and forth (CSS only: walk, leg shuffle, bob, blink),
+  hops with a heart when clicked, and sleeps with a floating "z" from 23:00 to
+  06:00. All of it stops under `prefers-reduced-motion`.
   Weather comes from Open-Meteo through the backend (`fetch_weather`), keyed
   by the `weather_location` setting; blank turns it off. The backend caches
   a result for 20 minutes.
@@ -147,7 +150,7 @@ The whole board flips to a single detail panel in the tile's colour:
 - **Tile section** in the detail view: size chips (Auto / Small / Medium /
   Wide → `size` key), 28 colour swatches and a native colour picker for any
   other hex (→ `color` key). Each pick writes the file immediately.
-- **Window opacity** (`window_opacity`, 20–100 %): the webview is
+- **Window opacity** (`window_opacity`, 20–100 %, 50 by default): the webview is
   transparent and every background (ground, strip, panel, faces, tiles,
   action bars) is mixed toward transparent by that amount with
   `color-mix`. Text, glyphs and edges stay fully opaque.
@@ -166,9 +169,10 @@ The whole board flips to a single detail panel in the tile's colour:
 - **Show in folder** opens the tip's file in Explorer.
 - Settings is an overlay in the same window, in three groups: **Tips folder**
   (path, Browse, Open folder); **appearance** (language, theme, columns,
-  weather city, panel, show done); **window** (hotkey, dock, always on top /
-  always on bottom (both off by default, mutually exclusive), autostart,
-  notify on new tips).
+  weather city (Nottingham by default), panel, show done); **window** (hotkey,
+  dock, always on top / always on bottom (mutually exclusive; on bottom by
+  default), autostart (on by default), notify on new tips). A settings file
+  asking for both layers is repaired on load: on top wins.
 
 ### Capture window
 

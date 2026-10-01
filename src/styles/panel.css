@@ -115,3 +115,210 @@
 .panel[data-weather='off'] .panel-now {
   display: none;
 }
+
+/* Clawd: a pixel companion pacing between the clock and the weather.
+   The SVG is 16 x 11 units drawn at 2.5 px per unit. */
+.clawd-track {
+  --clawd-clay: #d97757;
+  --clawd-ink: #1f1e1d;
+  --clawd-range: 22px;
+  flex: 1 1 auto;
+  min-width: 40px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  padding-bottom: 1px;
+}
+
+.clawd-walker {
+  display: block;
+  animation: clawd-pace 16s ease-in-out infinite;
+}
+
+.clawd-sprite {
+  position: relative;
+  display: block;
+  width: 40px;
+  height: 27.5px;
+  cursor: pointer;
+}
+
+.clawd {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.clawd-body rect {
+  fill: var(--clawd-clay);
+}
+
+.clawd-legs rect {
+  fill: var(--clawd-clay);
+  filter: brightness(0.82);
+}
+
+.clawd-eyes rect {
+  fill: var(--clawd-ink);
+}
+
+.clawd-figure {
+  animation: clawd-bob 0.5s steps(2, jump-none) infinite;
+}
+
+.clawd-legs-a {
+  animation: clawd-step 0.5s steps(1, end) infinite;
+}
+
+.clawd-legs-b {
+  animation: clawd-step 0.5s steps(1, end) infinite reverse;
+}
+
+.clawd-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: clawd-blink 4.5s infinite;
+}
+
+.clawd-heart,
+.clawd-z {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.clawd-heart {
+  color: var(--clawd-clay);
+}
+
+.clawd-z {
+  left: 85%;
+  top: -6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-family: var(--font-title);
+}
+
+/* Click: hop with a heart. */
+.clawd-hopping .clawd-sprite {
+  animation: clawd-hop 0.7s ease-out;
+}
+
+.clawd-hopping .clawd-heart {
+  animation: clawd-float 0.7s ease-out;
+}
+
+/* Night: stop, close the eyes, float a z. */
+.clawd-track[data-sleeping='true'] .clawd-walker,
+.clawd-track[data-sleeping='true'] .clawd-figure,
+.clawd-track[data-sleeping='true'] .clawd-legs {
+  animation: none;
+}
+
+.clawd-track[data-sleeping='true'] .clawd-eyes {
+  animation: none;
+  transform: scaleY(0.25) translateY(2px);
+}
+
+.clawd-track[data-sleeping='true'] .clawd-z {
+  animation: clawd-float 2.4s ease-out infinite;
+}
+
+@keyframes clawd-pace {
+  0%,
+  6% {
+    transform: translateX(calc(-1 * var(--clawd-range))) scaleX(1);
+  }
+  42%,
+  50% {
+    transform: translateX(var(--clawd-range)) scaleX(1);
+  }
+  52%,
+  56% {
+    transform: translateX(var(--clawd-range)) scaleX(-1);
+  }
+  92%,
+  98% {
+    transform: translateX(calc(-1 * var(--clawd-range))) scaleX(-1);
+  }
+  100% {
+    transform: translateX(calc(-1 * var(--clawd-range))) scaleX(1);
+  }
+}
+
+@keyframes clawd-bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-0.5px);
+  }
+}
+
+@keyframes clawd-step {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes clawd-blink {
+  0%,
+  93%,
+  100% {
+    transform: scaleY(1);
+  }
+  95%,
+  97% {
+    transform: scaleY(0.15);
+  }
+}
+
+@keyframes clawd-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-8px);
+  }
+  60% {
+    transform: translateY(0);
+  }
+  75% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes clawd-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.6);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -12px) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clawd-walker,
+  .clawd-figure,
+  .clawd-legs,
+  .clawd-eyes,
+  .clawd-hopping .clawd-sprite,
+  .clawd-track[data-sleeping='true'] .clawd-z {
+    animation: none;
+  }
+}
