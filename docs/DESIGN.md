@@ -133,8 +133,9 @@ The whole board flips to a single detail panel in the tile's colour:
   Weather comes from Open-Meteo through the backend (`fetch_weather`), keyed
   by the `weather_location` setting; blank turns it off. The backend caches
   a result for 20 minutes.
-- Right-click on a tile → Done / Reopen, Snooze 1h, Tomorrow, Edit, Show in
-  folder, Delete… (a second menu confirms). The same actions live in the
+- Right-click on a tile → Done / Reopen, Snooze 1h, Tomorrow, Colour… (a
+  swatch grid: Auto, the 28 colours, a custom picker), Edit, Show in folder,
+  Delete… (a second menu confirms). The same actions live in the
   detail view; there Delete arms on the first click and fires on the second.
 - The last tile on the board is a quiet "+" tile. It (or `n`, `+`, `Insert`)
   opens an inline new-tip bar above the grid with the quick-capture syntax.

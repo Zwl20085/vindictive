@@ -113,6 +113,48 @@
   animation: menu-in 160ms var(--ease-out);
 }
 
+/* Colour grid opened from a tile's right-click menu. */
+.menu-swatches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.menu-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 22px);
+  gap: 4px;
+}
+
+.menu-swatch {
+  border: 0;
+  cursor: pointer;
+}
+
+.menu-swatch[aria-pressed='true'],
+.menu-swatch-auto[aria-pressed='true'] {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+
+.menu-swatch:focus-visible,
+.menu-swatch-auto:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.menu-swatch-auto {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border: 0;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
 @keyframes menu-in {
   from {
     opacity: 0;

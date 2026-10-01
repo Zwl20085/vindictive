@@ -4,8 +4,8 @@ import type { BoardState, Dock, Settings } from '../types';
 import { setLocale, t } from '../lib/i18n';
 import { minutesUntilTomorrowMorning } from '../lib/time';
 import { renderAddBar } from './addbar';
-import { SNOOZE_HOUR_MINUTES } from './detail';
-import { showMenu } from './menu';
+import { SNOOZE_HOUR_MINUTES, SWATCHES } from './detail';
+import { showMenu, showSwatchMenu } from './menu';
 import { fitTitles, handleBoardKeys, renderBoard } from './board';
 import { renderChrome } from './chrome';
 import { renderDetail } from './detail';
@@ -144,6 +144,17 @@ export class App {
             { label: t('tomorrow'), onSelect: () => a.onSnooze(id, minutesUntilTomorrowMorning(new Date())) },
           ]
         : []),
+      {
+        label: `${t('colour')}…`,
+        onSelect: () =>
+          showSwatchMenu(x, y, {
+            swatches: SWATCHES,
+            current: tip.color,
+            autoLabel: t('auto'),
+            customLabel: t('customColour'),
+            onPick: (color) => a.onSetColor(id, color),
+          }),
+      },
       { label: t('editLocal'), onSelect: () => a.onEditLocal(id) },
       { label: t('showInFolder'), onSelect: () => a.onReveal(id) },
       {

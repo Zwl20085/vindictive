@@ -89,7 +89,8 @@ date / weather panel sits on top, and the whole UI is in English or 简体中文
   tip fetches title, authors, year and venue into the file.
 - **Recurring tips.** `repeat: weekly on mon at 10:00`. Pressing Done rolls the
   tip forward instead of closing it.
-- **Tray icon, autostart, dark and light themes.**
+- **Tray icon, autostart, dark and light themes.** Only one copy runs: launching
+  it again just brings the board to the front.
 - **Private by default.** Tips never leave your PC except via your own OneDrive
   (or any sync tool you choose). No tokens, no GitHub account needed.
 
