@@ -39,7 +39,13 @@ async fn run(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .check()
         .await
-        .map_err(|e| format!("could not reach GitHub: {e}"))?;
+        .map_err(|e| match e {
+            // GitHub answered, but the latest release carries no latest.json.
+            tauri_plugin_updater::Error::ReleaseNotFound => {
+                "the latest GitHub release has no update file yet".to_string()
+            }
+            other => format!("could not reach GitHub: {other}"),
+        })?;
     let Some(update) = update else {
         notify::show(
             app,
