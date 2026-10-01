@@ -18,7 +18,7 @@ links:
   - https://ecce.org/authors
 tags: [ecce, paper]
 images:
-  - figures/coil-thermal.png     # relative to the tips directory
+  - figures/coil-thermal.png     # relative to the tips folder
   - figures/ac-loss-sweep.svg    # png, jpg, gif, webp, svg, or an https URL
 repeat: weekly on mon at 10:00   # daily | weekdays | weekly on mon,thu | monthly on 1 | yearly on 03-15
 color: "#FF0097"                 # optional tile colour override
@@ -46,7 +46,7 @@ Body in **Markdown**. Checklists, images, links all work.
   the first one is ghosted onto the tile itself when it is `md` or `wide`.
   Click a thumbnail to view it full-window.
 - Body images (`![alt](path)`) are resolved the same way and also open the
-  viewer. Relative paths go through the GitHub API, so private repos work.
+  viewer. Relative paths are resolved from the tips folder.
 - Inline `<svg>` in the body is rendered as-is after sanitising: scripts,
   event handlers, `<style>` and `<foreignObject>` are removed.
 
@@ -55,8 +55,8 @@ Body in **Markdown**. Checklists, images, links all work.
 A tip created from the capture bar or the "+" tile starts as a template:
 the keys you typed, a commented reference of every optional key, and an
 example body (checklist, figure, links). Edit or delete what you do not
-need. The comments last until the app rewrites the file (Done, snooze, a
-pushed local edit); by then they have done their job.
+need. The comments last until the app rewrites the file (Done, snooze, or
+when the file is modified); by then they have done their job.
 
 ## Keys the app writes
 

@@ -16,11 +16,7 @@ function at(now: Date, offsetMs: number): string {
 const query = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 
 export const SAMPLE_SETTINGS: Settings = {
-  owner: 'Zwl20085',
-  repo: 'vindictive-tips',
-  branch: 'main',
-  dir: 'tips',
-  poll_seconds: 60,
+  folder: 'C:\\Users\\you\\OneDrive\\Vindictive',
   hotkey: 'Ctrl+Shift+Space',
   dock: 'right',
   always_on_top: false,
@@ -34,7 +30,6 @@ export const SAMPLE_SETTINGS: Settings = {
   weather_location: query.get('weather') ?? 'Tokyo',
   show_panel: query.get('panel') !== '0',
   editor_command: 'code',
-  push_interval_minutes: 60,
   fit_height: true,
   window_opacity: Number(query.get('opacity') ?? 100),
 };

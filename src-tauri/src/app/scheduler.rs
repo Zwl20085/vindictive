@@ -1,4 +1,4 @@
-//! Background loop: periodic sync and reminder toasts.
+//! Background loop: rescan the tips folder and raise reminder toasts.
 
 use std::time::Duration;
 
@@ -7,14 +7,16 @@ use tauri::AppHandle;
 use super::notify;
 use super::state::{now, AppState};
 
-/// Matches `settings::MIN_POLL_SECONDS` so every allowed poll interval is honoured.
-const TICK: Duration = Duration::from_secs(15);
+/// How often the tips folder is rescanned. A scan of an unchanged folder is
+/// one directory listing, so this can be short: edits made in an editor or
+/// arriving through OneDrive show up within a few seconds.
+const TICK: Duration = Duration::from_secs(3);
 const MAX_NEW_TIP_TITLES: usize = 3;
 
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        // Give the webview a moment before the first network round trip.
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        // Give the webview a moment before the first scan.
+        tokio::time::sleep(Duration::from_secs(1)).await;
         loop {
             tick(&app).await;
             tokio::time::sleep(TICK).await;
@@ -24,25 +26,13 @@ pub fn start(app: AppHandle) {
 
 async fn tick(app: &AppHandle) {
     let state = AppState::from_app(app);
-    if should_sync(&state) {
+    if state.settings().is_configured() {
         match state.sync(app).await {
             Ok(new_ids) => announce_new_tips(app, &state, &new_ids),
             Err(e) => log::debug!("scheduled sync skipped: {e}"),
         }
     }
     fire_reminders(app, &state);
-}
-
-fn should_sync(state: &AppState) -> bool {
-    let settings = state.settings();
-    if !settings.is_configured() {
-        return false;
-    }
-    let poll = chrono::Duration::seconds(settings.poll_seconds as i64);
-    match state.with(|i| i.last_sync) {
-        None => true,
-        Some(last) => now() - last >= poll,
-    }
 }
 
 fn announce_new_tips(app: &AppHandle, state: &AppState, new_ids: &[String]) {

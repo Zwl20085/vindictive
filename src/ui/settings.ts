@@ -1,26 +1,22 @@
 import type { Dock, Language, Settings, Theme } from '../types';
 import { isLanguage, LOCALES, t, type StringKey } from '../lib/i18n';
-import { newRepoUrl, newTokenUrl, parseRepoInput } from '../lib/github';
 import { clampColumns, MAX_COLUMNS, MIN_COLUMNS } from './board';
 import { el } from './dom';
 
-export const MIN_POLL_SECONDS = 15;
 export const MAX_WEATHER_LOCATION_CHARS = 80;
 export const MIN_WINDOW_OPACITY = 20;
 export const MAX_WINDOW_OPACITY = 100;
 
 export interface SettingsActions {
   onSave: (settings: Settings) => Promise<void>;
-  onSetToken: (token: string) => Promise<void>;
-  onClearToken: () => Promise<void>;
-  onTest: () => Promise<string>;
-  onOpenLink: (url: string) => void;
+  /** Folder picker; resolves to `null` when cancelled. */
+  onPickFolder: () => Promise<string | null>;
+  onOpenFolder: () => Promise<void>;
   onClose: () => void;
 }
 
 export interface SettingsOptions {
   settings: Settings;
-  hasToken: boolean;
   actions: SettingsActions;
 }
 
@@ -54,16 +50,11 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   const data = new FormData(form);
   const str = (k: keyof Settings): string => String(data.get(k) ?? '').trim();
   const bool = (k: keyof Settings): boolean => data.get(k) !== null;
-  const poll = Number(str('poll_seconds'));
   const dock = str('dock') as Dock;
   const theme = str('theme') as Theme;
   const language = str('language');
-  // A pasted `owner/repo` or GitHub URL in either field fills both.
-  const pasted = parseRepoInput(str('owner')) ?? parseRepoInput(str('repo'));
-  const owner = pasted?.owner ?? str('owner');
-  const repo = pasted?.repo ?? str('repo');
-  if (Boolean(owner) !== Boolean(repo)) throw new Error(t('ownerRepoBoth'));
-  if (!Number.isFinite(poll) || poll < MIN_POLL_SECONDS) throw new Error(`poll interval must be at least ${MIN_POLL_SECONDS} s`);
+  const folder = str('folder');
+  if (!folder) throw new Error(t('folderRequired'));
   if (!DOCKS.includes(dock)) throw new Error('invalid dock');
   if (!THEMES.includes(theme)) throw new Error('invalid theme');
   if (!isLanguage(language)) throw new Error('invalid language');
@@ -72,11 +63,7 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   if (alwaysOnTop && alwaysOnBottom) throw new Error(t('layerConflict'));
   return {
     ...base,
-    owner,
-    repo,
-    branch: str('branch') || 'main',
-    dir: str('dir').replace(/^\/+|\/+$/g, ''),
-    poll_seconds: Math.round(poll),
+    folder,
     hotkey: str('hotkey') || base.hotkey,
     dock,
     theme,
@@ -84,7 +71,6 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
     columns: clampColumns(Number(str('columns'))),
     weather_location: str('weather_location').slice(0, MAX_WEATHER_LOCATION_CHARS),
     editor_command: str('editor_command'),
-    push_interval_minutes: Math.max(0, Math.round(Number(str('push_interval_minutes')) || 0)),
     fit_height: bool('fit_height'),
     window_opacity: Math.min(MAX_WINDOW_OPACITY, Math.max(MIN_WINDOW_OPACITY, Math.round(Number(str('window_opacity')) || MAX_WINDOW_OPACITY))),
     show_panel: bool('show_panel'),
@@ -96,49 +82,30 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   };
 }
 
-function tokenSection(hasToken: boolean, actions: SettingsActions, status: HTMLElement): HTMLElement {
-  const input = el('input', { type: 'password', name: 'token', placeholder: hasToken ? t('tokenStored') : 'github_pat_…', autocomplete: 'off' });
-  const save = el('button', { type: 'button', className: 'action', text: t('saveToken') });
-  const clearBtn = el('button', { type: 'button', className: 'action', text: t('clear') });
-  const test = el('button', { type: 'button', className: 'action', text: t('testConnection') });
-  const run = async (label: string, fn: () => Promise<string | void>): Promise<void> => {
-    status.textContent = `${label}…`;
-    status.dataset.state = 'busy';
-    try {
-      const result = await fn();
-      status.textContent = typeof result === 'string' ? result : `${label} ${t('doneSuffix')}`;
-      status.dataset.state = 'ok';
-    } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
-      status.dataset.state = 'error';
-    }
+/** The tips folder: a path field plus Browse and Open buttons. */
+function folderSection(value: string, actions: SettingsActions, status: HTMLElement): HTMLElement {
+  const input = text('folder', value, 'text', { placeholder: 'C:\\Users\\you\\OneDrive\\Vindictive' });
+  const browse = el('button', { type: 'button', className: 'action', text: `${t('browse')}…` });
+  const open = el('button', { type: 'button', className: 'action', text: t('openFolder') });
+  const report = (error: unknown): void => {
+    status.textContent = error instanceof Error ? error.message : String(error);
+    status.dataset.state = 'error';
   };
-  save.addEventListener('click', () => {
-    const value = input.value.trim();
-    if (!value) return void run(t('saveToken'), async () => Promise.reject(new Error(t('tokenEmpty'))));
-    void run(t('saveToken'), async () => {
-      await actions.onSetToken(value);
-      input.value = '';
-      input.placeholder = t('tokenStored');
-    });
+  browse.addEventListener('click', () => {
+    actions
+      .onPickFolder()
+      .then((picked) => {
+        if (picked) input.value = picked;
+      })
+      .catch(report);
   });
-  clearBtn.addEventListener('click', () => void run(t('clearToken'), () => actions.onClearToken()));
-  test.addEventListener('click', () => void run(t('testing'), () => actions.onTest()));
-  return el('section', { className: 'set-token' }, field(t('githubToken'), 'token', input), el('div', { className: 'set-row' }, save, clearBtn, test));
-}
-
-/** Two pre-filled GitHub pages that cover the whole first-time setup. */
-function setupLinks(owner: string, actions: SettingsActions): HTMLElement {
-  const link = (label: string, url: string): HTMLElement => {
-    const button = el('button', { type: 'button', className: 'action', text: `${label} ↗` });
-    button.addEventListener('click', () => actions.onOpenLink(url));
-    return button;
-  };
+  open.addEventListener('click', () => void actions.onOpenFolder().catch(report));
   return el(
     'div',
-    { className: 'set-setup' },
-    el('p', { className: 'set-hint', text: t('setupHint') }),
-    el('div', { className: 'set-row' }, link(t('setupRepo'), newRepoUrl()), link(t('setupToken'), newTokenUrl(owner))),
+    { className: 'set-folder' },
+    el('p', { className: 'set-hint', text: t('folderHint') }),
+    field(t('tipsFolder'), 'folder', input),
+    el('div', { className: 'set-row' }, browse, open),
   );
 }
 
@@ -162,22 +129,13 @@ function group(title: string, ...children: (HTMLElement | null)[]): HTMLElement 
 
 /** Settings overlay for the main window. */
 export function renderSettings(options: SettingsOptions): HTMLElement {
-  const { settings: s, hasToken, actions } = options;
+  const { settings: s, actions } = options;
   const status = el('p', { className: 'set-status', role: 'status' });
   const form = el(
     'form',
     { className: 'settings', 'aria-label': t('settings') },
     el('h1', { className: 'set-title', text: t('settings') }),
-    group(
-      'GitHub',
-      setupLinks(s.owner, actions),
-      field(t('owner'), 'owner', text('owner', s.owner, 'text', { placeholder: 'owner  or  https://github.com/owner/repo' })),
-      field(t('repo'), 'repo', text('repo', s.repo, 'text', { placeholder: 'vindictive-tips' })),
-      field(t('branch'), 'branch', text('branch', s.branch)),
-      field(t('directory'), 'dir', text('dir', s.dir)),
-      tokenSection(hasToken, actions, status),
-      field(t('pollSeconds'), 'poll_seconds', text('poll_seconds', String(s.poll_seconds), 'number')),
-    ),
+    group(t('tipsFolder'), folderSection(s.folder, actions, status)),
     group(
       t('theme'),
       field(t('language'), 'language', select('language', s.language, LOCALES)),
@@ -193,7 +151,6 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
       t('dock'),
       field(t('hotkey'), 'hotkey', text('hotkey', s.hotkey)),
       field(t('editorCommand'), 'editor_command', text('editor_command', s.editor_command, 'text', { placeholder: 'code' })),
-      field(t('pushInterval'), 'push_interval_minutes', text('push_interval_minutes', String(s.push_interval_minutes), 'number', { min: '0' })),
       field(t('dock'), 'dock', select('dock', s.dock, DOCKS)),
       check('always_on_top', s.always_on_top, t('alwaysOnTop')),
       check('always_on_bottom', s.always_on_bottom, t('alwaysOnBottom')),

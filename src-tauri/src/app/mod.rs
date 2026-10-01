@@ -6,7 +6,6 @@ pub mod commands;
 pub mod editor;
 pub mod notify;
 pub mod scheduler;
-pub mod secrets;
 pub mod settings;
 pub mod state;
 pub mod storage;

@@ -6,11 +6,10 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
-use super::state::AppState;
-use super::{editor, notify};
+use super::notify;
 
 /// Set while a check or install runs, so repeated clicks do nothing.
 static BUSY: AtomicBool = AtomicBool::new(false);
@@ -62,10 +61,6 @@ async fn run(app: &AppHandle) -> Result<(), String> {
             update.version
         ),
     );
-    // The installer closes the app; get local edits onto GitHub first.
-    let state = app.state::<AppState>();
-    let pushed = editor::push_pending(app, &state).await;
-    log::info!("update: pushed {pushed} pending file(s) before install");
     update
         .download_and_install(|_, _| {}, || log::info!("update: download finished"))
         .await

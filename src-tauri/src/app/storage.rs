@@ -6,14 +6,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use super::editor::EditSession;
 use super::settings::Settings;
 use crate::core::tip::Tip;
 
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const CACHE_FILE: &str = "tips-cache.json";
 pub const FIRED_FILE: &str = "fired.json";
-pub const EDITS_FILE: &str = "edits.json";
 
 #[derive(Debug, Clone)]
 pub struct Storage {
@@ -53,14 +51,6 @@ impl Storage {
         self.write(FIRED_FILE, fired)
     }
 
-    pub fn load_edits(&self) -> Vec<EditSession> {
-        self.read(EDITS_FILE).unwrap_or_default()
-    }
-
-    pub fn save_edits(&self, edits: &[EditSession]) -> Result<(), String> {
-        self.write(EDITS_FILE, &edits)
-    }
-
     fn read<T: DeserializeOwned>(&self, name: &str) -> Option<T> {
         let path = self.dir.join(name);
         let text = std::fs::read_to_string(&path).ok()?;
@@ -93,7 +83,7 @@ mod tests {
         let st = Storage::new(tmp.path().join("nested"));
         assert_eq!(st.load_settings(), Settings::default());
         let s = Settings {
-            owner: "me".into(),
+            folder: "C:/tips".into(),
             ..Default::default()
         };
         st.save_settings(&s).unwrap();

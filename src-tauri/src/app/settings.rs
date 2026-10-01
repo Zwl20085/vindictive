@@ -2,15 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::sync::github::{validate_dir, validate_repo, RepoRef};
+use std::path::Path;
+
 use crate::sync::weather::MAX_LOCATION_CHARS;
 
-pub const MIN_POLL_SECONDS: u64 = 15;
-pub const MAX_POLL_SECONDS: u64 = 3600;
 pub const MIN_COLUMNS: u32 = 2;
 pub const MAX_COLUMNS: u32 = 6;
-/// Longest allowed gap between scheduled pushes of local edits.
-pub const MAX_PUSH_INTERVAL_MINUTES: u64 = 24 * 60;
 /// Window opacity range, percent. Below the minimum the board is unusable.
 pub const MIN_WINDOW_OPACITY: u8 = 20;
 pub const MAX_WINDOW_OPACITY: u8 = 100;
@@ -46,11 +43,9 @@ pub enum Language {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    pub owner: String,
-    pub repo: String,
-    pub branch: String,
-    pub dir: String,
-    pub poll_seconds: u64,
+    /// Absolute path of the folder holding the tip files, normally inside
+    /// OneDrive. Empty until the first start fills in the default.
+    pub folder: String,
     pub hotkey: String,
     pub dock: Dock,
     pub always_on_top: bool,
@@ -71,8 +66,6 @@ pub struct Settings {
     /// Command that opens a file for "Edit locally"; blank means the system
     /// default application for `.md`.
     pub editor_command: String,
-    /// Minutes between scheduled pushes of local edits; 0 pushes at once.
-    pub push_interval_minutes: u64,
     /// Resize the window height to fit the tiles (up to the work area).
     pub fit_height: bool,
     /// Background opacity of the whole window, percent (20..=100). Text stays solid.
@@ -82,11 +75,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            owner: String::new(),
-            repo: String::new(),
-            branch: "main".into(),
-            dir: "tips".into(),
-            poll_seconds: 60,
+            folder: String::new(),
             hotkey: "Ctrl+Shift+Space".into(),
             dock: Dock::Right,
             always_on_top: false,
@@ -100,7 +89,6 @@ impl Default for Settings {
             weather_location: String::new(),
             show_panel: true,
             editor_command: "code".into(),
-            push_interval_minutes: 60,
             fit_height: true,
             window_opacity: 100,
         }
@@ -108,35 +96,19 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// True once owner and repo are filled in.
+    /// True once a tips folder is set.
     pub fn is_configured(&self) -> bool {
-        !self.owner.trim().is_empty() && !self.repo.trim().is_empty()
-    }
-
-    pub fn repo_ref(&self) -> RepoRef {
-        RepoRef {
-            owner: self.owner.trim().to_string(),
-            repo: self.repo.trim().to_string(),
-            branch: self.branch.trim().to_string(),
-        }
+        !self.folder.trim().is_empty()
     }
 
     /// Validate and normalise. Returns a new, cleaned `Settings`.
     pub fn validated(&self) -> Result<Settings, String> {
         let mut s = self.clone();
-        s.owner = s.owner.trim().to_string();
-        s.repo = s.repo.trim().to_string();
-        s.branch = s.branch.trim().to_string();
-        if s.branch.is_empty() {
-            s.branch = "main".into();
-        }
-        if s.is_configured() {
-            validate_repo(&s.repo_ref()).map_err(|e| e.to_string())?;
-        }
-        s.dir = validate_dir(&s.dir).map_err(|e| e.to_string())?;
-        if !(MIN_POLL_SECONDS..=MAX_POLL_SECONDS).contains(&s.poll_seconds) {
+        s.folder = s.folder.trim().to_string();
+        if s.is_configured() && !Path::new(&s.folder).is_absolute() {
             return Err(format!(
-                "poll interval must be between {MIN_POLL_SECONDS} and {MAX_POLL_SECONDS} seconds"
+                "tips folder must be a full path such as C:/Users/you/OneDrive/Vindictive, not {:?}",
+                s.folder
             ));
         }
         if !(MIN_COLUMNS..=MAX_COLUMNS).contains(&s.columns) {
@@ -166,21 +138,7 @@ impl Settings {
         if s.always_on_top && s.always_on_bottom {
             return Err("always on top and always on bottom cannot both be on".into());
         }
-        if s.push_interval_minutes > MAX_PUSH_INTERVAL_MINUTES {
-            return Err(format!(
-                "push interval must be at most {MAX_PUSH_INTERVAL_MINUTES} minutes"
-            ));
-        }
         Ok(s)
-    }
-
-    /// Repository path of the tips directory joined with a file name.
-    pub fn tip_path(&self, file_name: &str) -> String {
-        if self.dir.is_empty() {
-            file_name.to_string()
-        } else {
-            format!("{}/{}", self.dir, file_name)
-        }
     }
 }
 
@@ -191,30 +149,19 @@ mod tests {
     #[test]
     fn defaults_are_valid() {
         let s = Settings::default().validated().unwrap();
-        assert_eq!(s.dir, "tips");
+        assert!(s.folder.is_empty());
         assert!(!s.is_configured());
     }
 
     #[test]
     fn validation_catches_bad_values() {
         let s = Settings {
-            poll_seconds: 5,
-            ..Default::default()
-        };
-        assert!(s.validated().is_err());
-        let s = Settings {
             columns: 9,
             ..Default::default()
         };
         assert!(s.validated().is_err());
         let s = Settings {
-            dir: "../x".into(),
-            ..Default::default()
-        };
-        assert!(s.validated().is_err());
-        let s = Settings {
-            owner: "a b".into(),
-            repo: "r".into(),
+            folder: "relative/tips".into(),
             ..Default::default()
         };
         assert!(s.validated().is_err());
@@ -240,36 +187,34 @@ mod tests {
     }
 
     #[test]
-    fn normalises() {
+    fn normalises_the_folder() {
         let s = Settings {
-            owner: " Zwl20085 ".into(),
-            repo: "tips".into(),
-            branch: "".into(),
-            dir: "/notes/".into(),
+            folder: "  C:/Users/me/OneDrive/Vindictive  ".into(),
             ..Default::default()
         }
         .validated()
         .unwrap();
-        assert_eq!(s.owner, "Zwl20085");
-        assert_eq!(s.branch, "main");
-        assert_eq!(s.dir, "notes");
-        assert_eq!(s.tip_path("a.md"), "notes/a.md");
-        let root = Settings {
-            dir: "".into(),
-            ..Default::default()
-        };
-        assert_eq!(root.tip_path("a.md"), "a.md");
+        assert_eq!(s.folder, "C:/Users/me/OneDrive/Vindictive");
+        assert!(s.is_configured());
+    }
+
+    #[test]
+    fn old_github_settings_still_load() {
+        let s: Settings = serde_json::from_str(
+            r#"{"owner":"x","repo":"y","branch":"main","dir":"tips","poll_seconds":60,"push_interval_minutes":60,"theme":"light"}"#,
+        )
+        .unwrap();
+        assert_eq!(s.theme, Theme::Light);
+        assert!(!s.is_configured());
     }
 
     #[test]
     fn json_roundtrip_with_missing_keys() {
-        let s: Settings = serde_json::from_str(r#"{"owner":"x"}"#).unwrap();
-        assert_eq!(s.owner, "x");
-        assert_eq!(s.poll_seconds, 60);
+        let s: Settings = serde_json::from_str(r#"{"folder":"D:/tips"}"#).unwrap();
+        assert_eq!(s.folder, "D:/tips");
         assert_eq!(s.language, Language::En);
         assert!(s.show_panel);
         assert_eq!(s.editor_command, "code");
-        assert_eq!(s.push_interval_minutes, 60);
         assert!(s.fit_height);
         assert!(!s.always_on_top);
         assert!(!s.always_on_bottom);

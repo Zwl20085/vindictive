@@ -3,16 +3,18 @@
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
+use std::path::{Path, PathBuf};
+
 use chrono::Duration;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 use super::settings::{Dock, Language, Settings};
 use super::state::{now, AppState, BoardState};
-use super::{editor, secrets, windows};
+use super::{editor, windows};
 use crate::core::capture;
 use crate::core::template;
 use crate::core::tip::{slugify, Kind, Tip};
-use crate::sync::github::{validate_dir, GithubClient};
 use crate::sync::meta;
 use crate::sync::weather::{self, Weather};
 
@@ -147,13 +149,6 @@ pub async fn set_order(
     Ok(state.snapshot())
 }
 
-/// Commit every pending local edit now.
-#[tauri::command]
-pub async fn push_now(app: AppHandle, state: State<'_, AppState>) -> Result<BoardState, String> {
-    editor::push_pending(&app, &state).await;
-    Ok(state.snapshot())
-}
-
 /// Resize the board window to `height` logical pixels, clamped to the
 /// monitor's work area, keeping it docked.
 #[tauri::command]
@@ -172,17 +167,49 @@ fn is_hex_color(value: &str) -> bool {
     (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// Open the tip in the local editor and keep it in sync; returns the file path.
+/// Open the tip's file in the editor; returns the file path.
 #[tauri::command]
-pub fn edit_local(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<String, String> {
-    editor::open(&app, &state, &id).map(|p| p.display().to_string())
+pub fn edit_local(state: State<'_, AppState>, id: String) -> Result<String, String> {
+    editor::open(&state, &id).map(|p| p.display().to_string())
 }
 
-/// Delete a tip's file from the repository and drop it from the board.
+/// Show the tip's file selected in Explorer.
+#[tauri::command]
+pub fn reveal_tip(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let tip = find(&state, &id)?;
+    let path = state
+        .store()?
+        .resolve(&tip.path)
+        .map_err(|e| e.to_string())?;
+    tauri_plugin_opener::reveal_item_in_dir(&path)
+        .map_err(|e| format!("cannot show {}: {e}", path.display()))
+}
+
+/// Open the tips folder in Explorer.
+#[tauri::command]
+pub fn open_folder(state: State<'_, AppState>) -> Result<(), String> {
+    let store = state.store()?;
+    tauri_plugin_opener::open_path(store.root(), None::<&str>)
+        .map_err(|e| format!("cannot open {}: {e}", store.root().display()))
+}
+
+/// Let the user pick a folder; `None` when the dialog is cancelled.
+#[tauri::command]
+pub async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let dialog = app.dialog().file();
+    // Owned by the board so it opens in front even when the board is on top.
+    let dialog = match app.get_webview_window(windows::MAIN) {
+        Some(main) => dialog.set_parent(&main),
+        None => dialog,
+    };
+    let picked = dialog.blocking_pick_folder();
+    picked
+        .map(|p| p.into_path().map(|p| p.display().to_string()))
+        .transpose()
+        .map_err(|e| format!("cannot use that folder: {e}"))
+}
+
+/// Delete a tip's file and drop it from the board.
 #[tauri::command]
 pub async fn delete_tip(
     app: AppHandle,
@@ -190,13 +217,13 @@ pub async fn delete_tip(
     id: String,
 ) -> Result<BoardState, String> {
     let tip = find(&state, &id)?;
-    let sha = tip
+    let stamp = tip
         .sha
         .clone()
-        .ok_or("this tip has not been synced yet; try again after the next sync")?;
-    let client = state.client()?;
-    let msg = format!("vindictive: delete \"{}\"", tip.front.title);
-    match client.delete_file(&tip.path, &sha, &msg).await {
+        .ok_or("this tip has not been loaded from its file yet; try again in a moment")?;
+    let store = state.store()?;
+    log::info!("vindictive: delete \"{}\"", tip.front.title);
+    match store.delete(&tip.path, &stamp) {
         Ok(()) => {
             state.replace_board(state.board().remove(&id));
             state.emit(&app);
@@ -232,8 +259,7 @@ pub async fn create_tip(
         created_at.format("%Y-%m-%d"),
         slugify(&front.title)
     );
-    let file_name = state.board().unique_file_name(&stem);
-    let path = settings.tip_path(&file_name);
+    let path = state.board().unique_file_name(&stem);
     let title = front.title.clone();
     let zh = settings.language == Language::Zh;
     let (tip, text) = template::render(&path, front, zh).map_err(|e| e.to_string())?;
@@ -259,57 +285,22 @@ pub async fn save_settings(
 ) -> Result<BoardState, String> {
     let clean = settings.validated()?;
     let previous = state.settings();
+    let folder_changed = previous.folder != clean.folder;
+    if folder_changed && clean.is_configured() {
+        ensure_folder(Path::new(&clean.folder))?;
+    }
+    // Save first: if that fails the board and the old folder stay as they were.
     state.set_settings(clean.clone())?;
-    windows::apply_settings(&app, &previous, &clean);
-    let repo_changed = previous.repo_ref() != clean.repo_ref() || previous.dir != clean.dir;
-    if repo_changed {
+    if folder_changed {
+        state.with(|i| i.broken.clear());
         state.replace_board(Default::default());
     }
+    windows::apply_settings(&app, &previous, &clean);
     state.emit(&app);
-    if repo_changed && clean.is_configured() {
+    if folder_changed && clean.is_configured() {
         let _ = state.sync(&app).await;
     }
     Ok(state.snapshot())
-}
-
-#[tauri::command]
-pub fn set_token(app: AppHandle, state: State<'_, AppState>, token: String) -> Result<(), String> {
-    secrets::set_token(&token)?;
-    state.emit(&app);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn clear_token(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    secrets::clear_token()?;
-    state.emit(&app);
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn test_connection(state: State<'_, AppState>) -> Result<String, String> {
-    let client = state.client()?;
-    let settings = state.settings();
-    let dir = validate_dir(&settings.dir).map_err(|e| e.to_string())?;
-    let files = client
-        .list_dir_or_empty(&dir)
-        .await
-        .map_err(|e| e.to_string())?;
-    let count = files
-        .iter()
-        .filter(|f| f.kind == "file" && f.name.ends_with(".md"))
-        .count();
-    let repo = client.repo();
-    if files.is_empty() {
-        return Ok(format!(
-            "OK: {}/{} is reachable. No tips in {}/ yet; your first tip creates it.",
-            repo.owner, repo.repo, settings.dir
-        ));
-    }
-    Ok(format!(
-        "OK: {count} tips in {}/{}/{}",
-        repo.owner, repo.repo, settings.dir
-    ))
 }
 
 #[tauri::command]
@@ -318,15 +309,13 @@ pub async fn fetch_image(state: State<'_, AppState>, path: String) -> Result<Str
     if path.starts_with("http://") || path.starts_with("https://") || path.starts_with("data:") {
         return Ok(path.to_string());
     }
-    let settings = state.settings();
-    let repo_path = resolve_repo_path(&settings, path)?;
+    let repo_path = image_path(path)?;
     if let Some(cached) = state.cached_image(&repo_path) {
         return Ok(cached);
     }
-    let client = state.client()?;
-    let bytes = client
-        .get_bytes(&repo_path)
-        .await
+    let bytes = state
+        .store()?
+        .read_bytes(&repo_path)
         .map_err(|e| e.to_string())?;
     if bytes.len() > MAX_IMAGE_BYTES {
         return Err("image is larger than 8 MB".into());
@@ -438,18 +427,21 @@ pub async fn enrich(app: &AppHandle, id: &str) -> Result<(), String> {
     state.save_tip(app, enriched, &msg).await.map(|_| ())
 }
 
-/// Resolve an image reference to a repository path.
-fn resolve_repo_path(settings: &Settings, path: &str) -> Result<String, String> {
-    let cleaned = validate_dir(path).map_err(|e| e.to_string())?;
+/// An image reference relative to the tips folder, with `/` separators.
+/// Escaping the folder is refused later by `FolderStore::resolve`.
+fn image_path(path: &str) -> Result<String, String> {
+    let cleaned = path.trim().trim_start_matches('/').replace('\\', "/");
     if cleaned.is_empty() {
         return Err("empty image path".into());
     }
-    let dir = settings.dir.as_str();
-    if dir.is_empty() || cleaned.starts_with(&format!("{dir}/")) {
-        Ok(cleaned)
-    } else {
-        Ok(format!("{dir}/{cleaned}"))
-    }
+    Ok(cleaned)
+}
+
+/// Create the tips folder if needed, so picking a new folder just works.
+pub fn ensure_folder(folder: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(folder)
+        .map_err(|e| format!("cannot create tips folder {}: {e}", folder.display()))?;
+    Ok(folder.to_path_buf())
 }
 
 fn mime_for(path: &str) -> &'static str {
@@ -469,37 +461,24 @@ fn mime_for(path: &str) -> &'static str {
     }
 }
 
-#[allow(dead_code)]
-fn _assert_client_send(c: GithubClient) -> impl Send {
-    c
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn resolves_image_paths() {
-        let s = Settings {
-            dir: "tips".into(),
-            ..Default::default()
-        };
-        assert_eq!(
-            resolve_repo_path(&s, "figures/a.png").unwrap(),
-            "tips/figures/a.png"
-        );
-        assert_eq!(
-            resolve_repo_path(&s, "tips/figures/a.png").unwrap(),
-            "tips/figures/a.png"
-        );
-        assert!(resolve_repo_path(&s, "./figures/a.png").is_err());
-        assert!(resolve_repo_path(&s, "../secret.png").is_err());
-        assert!(resolve_repo_path(&s, "").is_err());
-        let root = Settings {
-            dir: "".into(),
-            ..Default::default()
-        };
-        assert_eq!(resolve_repo_path(&root, "a.png").unwrap(), "a.png");
+    fn image_paths_are_folder_relative() {
+        assert_eq!(image_path("figures/a.png").unwrap(), "figures/a.png");
+        assert_eq!(image_path("/figures\\a.png").unwrap(), "figures/a.png");
+        assert!(image_path("  ").is_err());
+    }
+
+    #[test]
+    fn ensure_folder_creates_nested_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("OneDrive").join("Vindictive");
+        ensure_folder(&target).unwrap();
+        assert!(target.is_dir());
+        ensure_folder(&target).unwrap();
     }
 
     #[test]

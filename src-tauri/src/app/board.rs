@@ -4,19 +4,19 @@
 use std::collections::HashMap;
 
 use crate::core::tip::Tip;
-use crate::sync::github::RemoteFile;
+use crate::sync::folder::FileEntry;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Board {
     pub tips: Vec<Tip>,
 }
 
-/// What a sync needs to download, computed from the remote listing.
+/// What a sync needs to read, computed from the folder listing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncPlan {
-    /// Paths whose SHA is new or changed.
+    /// Paths whose stamp is new or changed.
     pub to_fetch: Vec<String>,
-    /// Paths that no longer exist remotely.
+    /// Paths that are no longer in the folder.
     pub removed: Vec<String>,
 }
 
@@ -29,27 +29,23 @@ impl Board {
         self.tips.iter().find(|t| t.id == id)
     }
 
-    pub fn plan(&self, remote: &[RemoteFile]) -> SyncPlan {
+    pub fn plan(&self, files: &[FileEntry]) -> SyncPlan {
         let known: HashMap<&str, &str> = self
             .tips
             .iter()
             .map(|t| (t.path.as_str(), t.sha.as_deref().unwrap_or("")))
             .collect();
-        let remote_md: Vec<&RemoteFile> = remote
+        let to_fetch = files
             .iter()
-            .filter(|f| f.kind == "file" && f.name.ends_with(".md"))
-            .collect();
-        let to_fetch = remote_md
-            .iter()
-            .filter(|f| known.get(f.path.as_str()) != Some(&f.sha.as_str()))
+            .filter(|f| known.get(f.path.as_str()) != Some(&f.stamp.as_str()))
             .map(|f| f.path.clone())
             .collect();
-        let remote_paths: std::collections::HashSet<&str> =
-            remote_md.iter().map(|f| f.path.as_str()).collect();
+        let present: std::collections::HashSet<&str> =
+            files.iter().map(|f| f.path.as_str()).collect();
         let removed = self
             .tips
             .iter()
-            .filter(|t| !remote_paths.contains(t.path.as_str()))
+            .filter(|t| !present.contains(t.path.as_str()))
             .map(|t| t.path.clone())
             .collect();
         SyncPlan { to_fetch, removed }
@@ -125,33 +121,35 @@ mod tests {
     fn tip(path: &str, sha: &str) -> Tip {
         Tip::parse(path, Some(sha.into()), "---\ntitle: T\n---\n").unwrap()
     }
-    fn remote(path: &str, sha: &str) -> RemoteFile {
-        RemoteFile {
-            name: path.rsplit('/').next().unwrap().into(),
+    fn file(path: &str, stamp: &str) -> FileEntry {
+        FileEntry {
             path: path.into(),
-            sha: sha.into(),
-            size: 1,
-            kind: "file".into(),
+            stamp: stamp.into(),
         }
     }
 
     #[test]
-    fn plan_detects_new_changed_removed_and_ignores_non_md() {
-        let board = Board::new(vec![
-            tip("tips/a.md", "1"),
-            tip("tips/b.md", "2"),
-            tip("tips/c.md", "3"),
-        ]);
+    fn plan_detects_new_changed_and_removed() {
+        let board = Board::new(vec![tip("a.md", "1"), tip("b.md", "2"), tip("c.md", "3")]);
         let listing = vec![
-            remote("tips/a.md", "1"),
-            remote("tips/b.md", "changed"),
-            remote("tips/d.md", "4"),
-            remote("tips/figures", "x"),
-            remote("tips/readme.txt", "y"),
+            file("a.md", "1"),
+            file("b.md", "changed"),
+            file("d.md", "4"),
         ];
         let plan = board.plan(&listing);
-        assert_eq!(plan.to_fetch, vec!["tips/b.md", "tips/d.md"]);
-        assert_eq!(plan.removed, vec!["tips/c.md"]);
+        assert_eq!(plan.to_fetch, vec!["b.md", "d.md"]);
+        assert_eq!(plan.removed, vec!["c.md"]);
+    }
+
+    #[test]
+    fn old_repo_paths_are_replaced_without_new_ids() {
+        // A cache from the GitHub era holds `tips/a.md`; the folder has `a.md`.
+        let board = Board::new(vec![tip("tips/a.md", "sha")]);
+        let plan = board.plan(&[file("a.md", "1")]);
+        assert_eq!(plan.removed, vec!["tips/a.md"]);
+        let (next, new_ids) = board.apply(vec![tip("a.md", "1")], &plan.removed);
+        assert_eq!(next.tips.len(), 1);
+        assert!(new_ids.is_empty(), "same id, so no new-tip toast");
     }
 
     #[test]

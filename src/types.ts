@@ -66,12 +66,8 @@ export interface Tip {
 }
 
 export interface Settings {
-  owner: string;
-  repo: string;
-  branch: string;
-  /** Directory inside the repo holding tip files, e.g. `tips`. */
-  dir: string;
-  poll_seconds: number;
+  /** Absolute path of the folder holding the tip files, normally inside OneDrive. */
+  folder: string;
   /** Global shortcut for quick capture, e.g. `Ctrl+Shift+Space`. */
   hotkey: string;
   dock: Dock;
@@ -90,10 +86,8 @@ export interface Settings {
   weather_location: string;
   /** Show the clock / date / weather panel above the board. */
   show_panel: boolean;
-  /** Command for "Edit locally" (e.g. `code`); blank = system default app. */
+  /** Command for "Edit" (e.g. `code`); blank = system default app. */
   editor_command: string;
-  /** Minutes between scheduled pushes of local edits; 0 = at once. */
-  push_interval_minutes: number;
   /** Window height follows the tiles, up to the work area. */
   fit_height: boolean;
   /** Background opacity of the window in percent (20..100); text stays solid. */
@@ -124,14 +118,9 @@ export interface BoardState {
   next_up?: string;
   last_sync?: string;
   sync_error?: string;
-  has_token: boolean;
   settings: Settings;
   /** Backend local time at the moment the state was produced. */
   now: string;
-  /** Local edits saved but not yet committed. */
-  pending_edits: number;
-  /** When the next scheduled push runs, if anything is pending. */
-  next_push?: string;
 }
 
 /**
@@ -145,12 +134,16 @@ export interface Commands {
   mark_done: (args: { id: string }) => BoardState;
   reopen: (args: { id: string }) => BoardState;
   snooze: (args: { id: string; minutes: number }) => BoardState;
-  /** Remove the tip's file from the repository. Irreversible except through git history. */
+  /** Delete the tip's file (OneDrive keeps it in its recycle bin for a while). */
   delete_tip: (args: { id: string }) => BoardState;
-  /** Write the tip to the local edit folder, open it in the editor, and push every save. Returns the path. */
+  /** Open the tip's file in the editor; saving it is the edit. Returns the path. */
   edit_local: (args: { id: string }) => string;
-  /** Commit every pending local edit now. */
-  push_now: () => BoardState;
+  /** Show the tip's file selected in Explorer. */
+  reveal_tip: (args: { id: string }) => void;
+  /** Open the tips folder in Explorer. */
+  open_folder: () => void;
+  /** Folder picker; `null` when cancelled. */
+  pick_folder: () => string | null;
   /** Set (`#rrggbb`) or clear (`null`) the tile colour override. */
   set_color: (args: { id: string; color: string | null }) => BoardState;
   /** Set (`sm` | `md` | `wide`) or clear (`null`) the tile size override. */
@@ -162,11 +155,7 @@ export interface Commands {
   /** Quick-capture line, see `core/capture.rs` for the syntax. */
   create_tip: (args: { text: string }) => BoardState;
   save_settings: (args: { settings: Settings }) => BoardState;
-  set_token: (args: { token: string }) => void;
-  clear_token: () => void;
-  /** Human readable result, e.g. `OK: 12 tips in owner/repo/tips`. Throws on failure. */
-  test_connection: () => string;
-  /** Resolve an image reference (relative to the tips dir, repo path, or http URL)
+  /** Resolve an image reference (relative to the tips folder, or an http URL)
    *  to something an `<img>` can display: a data URL or the URL itself. */
   fetch_image: (args: { path: string }) => string;
   /** Fetch arXiv / Crossref metadata into `paper`. */

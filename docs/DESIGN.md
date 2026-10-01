@@ -1,9 +1,9 @@
 # Vindictive — Design Notes
 
 Vindictive is an always-on-top tile board that tells a researcher what to do
-next. Tips live as Markdown files in a private GitHub repository; the app
-polls them, renders each as a Windows 8 style live tile, and raises native
-Windows toasts at remind times.
+next. Tips live as Markdown files in a local folder (typically on OneDrive);
+the app rescans the folder every few seconds, renders each as a Windows 8 style
+live tile, and raises native Windows toasts at remind times.
 
 ## Principles
 
@@ -13,12 +13,13 @@ Windows toasts at remind times.
    gradients, no rounded corners, no borders. The one non-Microsoft thing
    is the typography: titles and the clock are set in a heavy Mincho-like
    serif, an Evangelion title-card gesture. Everything else is Segoe UI.
-3. **Owned data.** Every tip is a plain `.md` file the user can edit anywhere.
-   The app never invents a format that Obsidian or `cat` cannot read.
-4. **Quiet.** Toasts fire only at times the user wrote down. New remote tips
-   produce a single toast. Motion happens in response to the user (press,
-   flip, done) or once on arrival; nothing loops except the sync dot while
-   syncing.
+3. **Owned data.** Every tip is a plain `.md` file the user can edit anywhere
+   without authentication. The app never invents a format that Obsidian or
+   `cat` cannot read.
+4. **Quiet.** Toasts fire only at times the user wrote down. Tips that appear
+   in the folder from elsewhere (another PC, an editor) produce a single toast.
+   Motion happens in response to the user (press, flip, done) or once on
+   arrival; nothing loops except the sync dot while reading the folder.
 5. **Bilingual.** Every UI string exists in English and Simplified Chinese;
    the font stack falls through to Microsoft YaHei / PingFang so CJK titles
    render without tofu.
@@ -106,20 +107,22 @@ The whole board flips to a single detail panel in the tile's colour:
 2. Meta rows: location · repeat · tags · snoozed until.
 3. Paper block for arXiv / DOI tips: title, authors, venue, year.
 4. Figures: every `images` entry as a framed thumbnail (png, jpg, svg, webp,
-   gif; relative paths go through `fetch_image`, URLs load directly). Click
+   gif; relative paths load from the tips folder, URLs load directly). Click
    opens the lightbox.
 5. Body: rendered Markdown (sanitised). Inline `<svg>` is allowed (scripts,
    handlers, `foreignObject` and `style` are stripped). Body images also open
    the lightbox.
 6. Links list.
 7. Actions (flat text buttons): **Done** · **Snooze 1h** · **Tomorrow** ·
-   **Edit on GitHub** · **Back**.
+   **Edit** · **Back**.
 
 ### Board chrome
 
-- 20 px top strip, draggable (`data-tauri-drag-region`), contains a 6 px
-  sync square (green ok, amber syncing, red error) and the VINDICTIVE mark;
-  the last-sync time shows on hover.
+- 20 px top strip, draggable (`data-tauri-drag-region`), contains the sync
+  square (green ok, amber reading, red error such as a missing folder) and the
+  VINDICTIVE mark; the last scan time shows on hover. Right-click on the strip → context menu: **Reload tips folder**,
+  **Open tips folder**, **Settings**, **Show done**, **Dock left / right / free**,
+  **Quit**.
 - **Panel** (a flat surface block, draggable, `show_panel` setting): clock
   `HH:MM` with small seconds, date line (`2026-09-28 MON` / `2026年9月28日
   周一`), and weather on the right: glyph, temperature, place, high/low and
@@ -127,10 +130,8 @@ The whole board flips to a single detail panel in the tile's colour:
   Weather comes from Open-Meteo through the backend (`fetch_weather`), keyed
   by the `weather_location` setting; blank turns it off. The backend caches
   a result for 20 minutes.
-- Right-click on the strip → context menu: Sync now, Settings, Show done,
-  Dock left / right / free, Quit.
-- Right-click on a tile → Done / Reopen, Snooze 1h, Tomorrow, Edit on
-  GitHub, Delete… (a second menu confirms). The same actions live in the
+- Right-click on a tile → Done / Reopen, Snooze 1h, Tomorrow, Edit, Show in
+  folder, Delete… (a second menu confirms). The same actions live in the
   detail view; there Delete arms on the first click and fires on the second.
 - The last tile on the board is a quiet "+" tile. It (or `n`, `+`, `Insert`)
   opens an inline new-tip bar above the grid with the quick-capture syntax.
@@ -145,7 +146,7 @@ The whole board flips to a single detail panel in the tile's colour:
   Tips without `order` keep following the score ranking around it.
 - **Tile section** in the detail view: size chips (Auto / Small / Medium /
   Wide → `size` key), 28 colour swatches and a native colour picker for any
-  other hex (→ `color` key). Each pick is one commit.
+  other hex (→ `color` key). Each pick writes the file immediately.
 - **Window opacity** (`window_opacity`, 20–100 %): the webview is
   transparent and every background (ground, strip, panel, faces, tiles,
   action bars) is mixed toward transparent by that amount with
@@ -158,22 +159,16 @@ The whole board flips to a single detail panel in the tile's colour:
   window height is set to strip + panel + grid, clamped to the monitor's
   work area, and the board re-docks. Beyond that the board scrolls with a
   4 px scrollbar.
-- **Edit locally** (detail view and tile menu) writes the tip's Markdown to
-  `%APPDATA%\dev.zhangwentao.vindictive\edit\<repo path>`, opens it with
-  the `editor_command` setting (`code` by default; blank means the system
-  default app) and watches it every 2 s. Saves are collected as *pending*
-  (count shown on the strip) and committed, one commit per file, every
-  `push_interval_minutes` (default 60; 0 = at once) or when you pick
-  **Commit & push local edits now** in the strip menu or the tray. After a
-  push the file is rewritten in canonical form. If the tip changes elsewhere
-  while the file is untouched, the file is refreshed. Sessions persist in
-  `edits.json`, so pending edits survive a restart. A file that does not
-  parse (mid-edit frontmatter) stays pending until the next save fixes it.
-- Settings is an overlay in the same window, in three groups: GitHub (owner,
-  repo, branch, dir, token in Windows Credential Manager, poll interval);
-  appearance (language, theme, columns, weather city, panel, show done);
-  window (hotkey, dock, always on top / always on bottom (both off by
-  default, mutually exclusive), autostart, notify on new tips).
+- **Edit** (detail view and tile menu) opens the tip's `.md` file in your
+  configured editor (`editor_command` setting: `code` by default; blank means
+  the system default app for `.md`). The file is watched; when you save it,
+  the board rescans and updates within a few seconds.
+- **Show in folder** opens the tip's file in Explorer.
+- Settings is an overlay in the same window, in three groups: **Tips folder**
+  (path, Browse, Open folder); **appearance** (language, theme, columns,
+  weather city, panel, show done); **window** (hotkey, dock, always on top /
+  always on bottom (both off by default, mutually exclusive), autostart,
+  notify on new tips).
 
 ### Capture window
 
@@ -183,16 +178,18 @@ global hotkey (default `Ctrl+Shift+Space`).
 
 ## Data format
 
-See `docs/TIP-FORMAT.md`. One file per tip under `tips/` in the data repo.
+See `docs/TIP-FORMAT.md`. One Markdown file per tip in the tips folder.
 
 ## Architecture
 
 ```
 src/                 web frontend (vanilla TypeScript + Vite)
 src-tauri/src/core   pure domain logic, unit-tested, no I/O
-src-tauri/src/sync   GitHub Contents API, arXiv, Crossref, Open-Meteo
+src-tauri/src/sync   folder watcher, arXiv, Crossref, Open-Meteo
 src-tauri/src/app    Tauri state, commands, scheduler, tray, windows
 ```
 
-The backend owns the truth. Every mutation goes through a command that
-returns the new `BoardState` and emits `board-updated`.
+The backend owns the truth. Tips are files on disk; the `sync` module rescans
+the tips folder every ~3 seconds and notifies the app of changes. Every
+mutation (Done, Snooze, colour, order) writes the tip's file immediately and
+emits `board-updated` with the new `BoardState`.

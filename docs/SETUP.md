@@ -1,81 +1,56 @@
 # Setup
 
-The short version: on first launch click **Set up GitHub sync**, then use the
-two buttons at the top of the GitHub section, **Create repo ↗** and
-**Create token ↗**. Both open GitHub pages that are already filled in. The
-long version, step by step:
+Vindictive is set up automatically on first launch. No accounts, tokens, or
+configuration needed.
 
-## 1. Create the tips repository
+## Automatic setup
 
-1. In Vindictive Settings press **Create repo ↗**, or on GitHub go to
-   **New repository**. Name it `vindictive-tips` (any name works), choose
-   **Private**, tick **Add a README file**, and press **Create repository**.
-   The README gives the repo a `main` branch; a repo with no commits at all
-   has no branch to sync.
-2. You don't need to create the `tips/` folder. Your first tip creates it.
-   If you want a starter set, copy [`examples/tips/`](../examples/tips) from
-   this repo into the tips repo.
+When you run Vindictive the first time, it picks a tips folder:
 
-## 2. Create a fine-grained token
+- **If OneDrive is installed:** `%OneDrive%\Vindictive`
+- **Otherwise:** `Documents\Vindictive` in your user's home
 
-The app needs to read and write files in that one repository, nothing else.
+The folder is created if it doesn't exist. Tips are synced between PCs through
+OneDrive.
 
-1. In Vindictive Settings press **Create token ↗**. GitHub opens
-   *New fine-grained personal access token* with the name, a one-year expiry
-   and **Contents: Read and write** already filled in.
-   To do it by hand instead: avatar → **Settings** → **Developer settings** →
-   **Personal access tokens** → **Fine-grained tokens** → **Generate new token**,
-   then under **Permissions** set **Contents** to *Read and write*.
-2. **Repository access** → *Only select repositories* → pick
-   `vindictive-tips`. GitHub can't pre-fill this part.
-3. **Generate token** and copy it. It starts with `github_pat_`.
+Press `Ctrl+Shift+Space` and type your first tip. That's it.
 
-## 3. Connect the app
+## Using a different folder
 
-1. Open Settings: click **Set up GitHub sync** on the empty board, or
-   right-click the thin strip at the top of the board → **Settings**.
-2. Paste the repository URL, e.g. `https://github.com/<you>/vindictive-tips`,
-   into **Owner**. On Save it is split into owner and repo. You can also type
-   them separately. Branch defaults to `main` and directory to `tips`.
-3. Paste the token in the token field and press **Save token**, then **Save**.
-4. Press **Test connection**. You should see `OK: n tips in <you>/vindictive-tips/tips`,
-   or, for a fresh repo, a message that `tips/` will be created by your first tip.
-5. Press `Ctrl+Shift+Space` anywhere and type your first tip.
+If you want tips in a different location (another sync tool, a NAS share, etc.):
 
-The token goes to **Windows Credential Manager** under the generic credential
-`vindictive` (user name `github-token`). It is never written to a settings
-file, the tips repo, or a log. To remove it, press **Clear** next to the token
-field, or go to Control Panel → Credential Manager → Windows Credentials →
-`vindictive` → Remove.
+1. Open Settings (right-click the board strip → **Settings**)
+2. Under **Tips folder**, click **Browse…** and pick the folder
+3. Click **Save**
 
-## 4. Optional settings
+The folder is created if needed and the board reloads.
 
-In the same Settings overlay:
+## Syncing between PCs
 
-- **Language**: English or 中文. Applies to the board, the detail view, the
-  settings and the capture bar.
-- **Weather city**: a place name such as `Tokyo` or `南京`. The app looks it
-  up on Open-Meteo (no account needed) and shows the current conditions in the
-  panel above the tiles. Leave it blank to turn weather off.
-- **Show clock and weather panel**: hides the whole panel when unticked.
-- **Start with Windows**: the *Start with Windows* checkbox.
-- **Always on top**: off by default; tick it to keep the board above every window.
-- **Dock**: right-click the strip → *Dock left* / *Dock right* / *Free*.
-- **Hotkey**: default `Ctrl+Shift+Space`.
-- **Editor command**: what *Edit locally* runs; default `code` (VS Code),
-  blank opens the file with the default app for `.md`.
-- **Poll interval**: default 60 s. The app uses conditional requests, so an
-  unchanged repo costs one request per poll.
+Each PC just needs to be signed into the same OneDrive account. Changes appear
+on all PCs within a few seconds as each one rescans the tips folder. Any sync
+tool works: Dropbox, Syncthing, a NAS share, or a plain USB drive you carry.
+
+## Migrating from the GitHub version (0.2.x)
+
+If you were using Vindictive 0.2.x with GitHub:
+
+1. In your old repo, download or copy the `tips/` folder (including `figures/`
+   if you have images)
+2. Paste it into the new tips folder (either auto-created or one you picked in
+   Settings)
+3. The old settings are ignored harmlessly. You can remove the fine-grained
+   token from Windows Credential Manager: **Control Panel** →
+   **Credential Manager** → **Windows Credentials** → `vindictive` →
+   **Remove**
+4. The old repo can be archived or deleted
 
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 | ------- | ------------- |
-| `401 Unauthorized` on Test connection | Token expired, was pasted with a trailing space, or is a classic token without `repo` scope. Generate a fine-grained token as above. |
-| `404 Not Found` | The repo or branch name is wrong, the repo has no commits yet (add a README), or the token was not granted access to this repository (step 2.2). A missing `dir` is fine; it is created by your first tip. |
-| `403 rate limit exceeded` | You are polling faster than GitHub allows (5 000 requests/hour). Raise *Poll interval*; 60 s is safe. |
-| Tips appear but images do not | Image path must be relative to `dir`, and the file must be under 1 MB. |
+| Board is empty on first launch | The tips folder was just created. Press `Ctrl+Shift+Space` to create your first tip. |
+| I want to move my tips folder | Open Settings, click **Browse…** next to **Tips folder**, pick the new location, and **Save**. The app copies/moves files as needed. |
+| Tips are not updating from my other PC | Check that both PCs are synced through the same tool (OneDrive, Dropbox, etc.) and that the tips folder path is the same or points to the same shared location. Wait up to 10 seconds for a rescan. |
+| A tip I edited in my editor doesn't appear | The editor might not have written the file yet. Save explicitly if the editor shows unsaved changes. Check the log at `%LOCALAPPDATA%\dev.zhangwentao.vindictive\logs\` for any parsing errors. |
 | No toasts | Windows *Focus Assist* / *Do not disturb* is on, or notifications for Vindictive are off in *Settings → System → Notifications*. |
-| Toasts arrive but the board is not on top | Another window with the same flag was focused later. Click the board once; use *Dock* to keep it at an edge. |
-| Board vanished | It is in the tray. Click the tray icon → *Show*. |
-| A tip I edited on GitHub does not update | Wait one poll interval or right-click the strip → *Sync now*. Files that do not start with `---` are ignored; check the log in `%LOCALAPPDATA%\dev.zhangwentao.vindictive\logs` (see [DATA-LOCATIONS.md](DATA-LOCATIONS.md)). |

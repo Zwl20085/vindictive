@@ -80,7 +80,7 @@
   accent-color: var(--accent);
 }
 
-.set-token {
+.set-folder {
   display: flex;
   flex-direction: column;
   gap: 6px;

@@ -1,5 +1,4 @@
 import type { BoardState, Tip } from '../types';
-import { isConfigured } from '../lib/github';
 import { t } from '../lib/i18n';
 import type { ImageResolver } from '../lib/markdown';
 import { applyManualOrder, orderForMove } from '../lib/order';
@@ -118,12 +117,16 @@ function addTile(onAdd: () => void): HTMLButtonElement {
   return button;
 }
 
+/** A folder is set and readable. */
+function isReady(state: BoardState): boolean {
+  return state.settings.folder.trim().length > 0 && !state.sync_error;
+}
+
 function emptyMessage(state: BoardState, onSetup?: () => void): HTMLElement {
-  const ready = state.has_token && isConfigured(state.settings);
-  if (ready || !onSetup) return el('p', { className: 'board-empty', text: ready ? t('emptyWithToken') : t('emptyNoToken') });
-  const button = el('button', { type: 'button', className: 'action action-primary', text: t('setUpSync') });
+  if (isReady(state) || !onSetup) return el('p', { className: 'board-empty', text: t('emptyReady') });
+  const button = el('button', { type: 'button', className: 'action action-primary', text: t('chooseFolder') });
   button.addEventListener('click', onSetup);
-  return el('div', { className: 'board-empty' }, el('p', { text: t('emptyNoToken') }), button);
+  return el('div', { className: 'board-empty' }, el('p', { text: t('emptyNoFolder') }), button);
 }
 
 /** Render the tile grid into a fresh element. */
@@ -135,8 +138,7 @@ export function renderBoard(options: BoardOptions): HTMLElement {
 
   const tips = visibleTips(state, now);
   if (tips.length === 0) {
-    const ready = state.has_token && isConfigured(state.settings);
-    mount(grid, emptyMessage(state, onSetup), onAdd && ready ? addTile(onAdd) : null);
+    mount(grid, emptyMessage(state, onSetup), onAdd && isReady(state) ? addTile(onAdd) : null);
     return grid;
   }
   let entering = 0;

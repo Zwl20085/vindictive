@@ -7,7 +7,7 @@ import type { SyncStatus } from './store';
 
 export interface ChromeActions {
   onSync: () => void;
-  onPushNow: () => void;
+  onOpenFolder: () => void;
   onSettings: () => void;
   onToggleDone: () => void;
   onDock: (dock: Dock) => void;
@@ -23,31 +23,19 @@ export interface ChromeOptions {
 /** Brand mark on the strip; deliberately not translated. */
 export const BRAND = 'VINDICTIVE';
 
-function pendingNote(state: BoardState | undefined): string {
-  const n = state?.pending_edits ?? 0;
-  if (!n) return '';
-  const next = parseNaive(state?.next_push);
-  const when = next ? ` · ${t('nextPush')} ${formatClock(next)}` : '';
-  return ` · ${n} ${t('pendingEdits')}${when}`;
-}
-
 function syncTitle(state: BoardState | undefined, sync: SyncStatus): string {
-  const base = (() => {
-    if (sync === 'syncing') return t('syncing');
-    if (state?.sync_error) return `${t('syncError')}: ${state.sync_error}`;
-    const last = parseNaive(state?.last_sync);
-    return last ? `${t('synced')} ${formatClock(last)}` : t('notSynced');
-  })();
-  return base + pendingNote(state);
+  if (sync === 'syncing') return t('syncing');
+  if (state?.sync_error) return `${t('syncError')}: ${state.sync_error}`;
+  const last = parseNaive(state?.last_sync);
+  return last ? `${t('synced')} ${formatClock(last)}` : t('notSynced');
 }
 
 function buildMenu(options: ChromeOptions, x: number, y: number): void {
   const { state, actions } = options;
   const dock = state?.settings.dock;
-  const pending = state?.pending_edits ?? 0;
   showMenu(x, y, [
     { label: t('menuSync'), onSelect: actions.onSync },
-    { label: pending ? `${t('pushNow')} (${pending})` : t('pushNow'), onSelect: actions.onPushNow },
+    { label: t('openFolder'), onSelect: actions.onOpenFolder },
     { label: t('menuSettings'), onSelect: actions.onSettings },
     { label: t('menuShowDone'), checked: state?.settings.show_done, onSelect: actions.onToggleDone },
     { label: t('menuDockLeft'), checked: dock === 'left', onSelect: () => actions.onDock('left') },
@@ -72,7 +60,6 @@ export function renderChrome(options: ChromeOptions): HTMLElement {
     { className: 'chrome', 'data-tauri-drag-region': true, title: syncTitle(state, sync) },
     dot,
     el('span', { className: 'chrome-title', 'data-tauri-drag-region': true, text: BRAND }),
-    state?.pending_edits ? el('span', { className: 'chrome-pending', 'data-tauri-drag-region': true, text: String(state.pending_edits) }) : null,
   );
   strip.addEventListener('contextmenu', (event) => {
     event.preventDefault();

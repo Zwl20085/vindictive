@@ -5,7 +5,6 @@ import { setLocale, t } from '../lib/i18n';
 import { minutesUntilTomorrowMorning } from '../lib/time';
 import { renderAddBar } from './addbar';
 import { SNOOZE_HOUR_MINUTES } from './detail';
-import { editUrl } from '../lib/github';
 import { showMenu } from './menu';
 import { fitTitles, handleBoardKeys, renderBoard } from './board';
 import { renderChrome } from './chrome';
@@ -134,8 +133,7 @@ export class App {
   /** Right-click menu on a tile: the detail actions without flipping. */
   private tileMenu(id: string, x: number, y: number): void {
     const tip = this.store.get().board?.tips.find((t) => t.id === id);
-    const settings = this.store.get().board?.settings;
-    if (!tip || !settings) return;
+    if (!tip) return;
     const a = this.detailActions();
     const open = tip.status === 'open';
     showMenu(x, y, [
@@ -147,7 +145,7 @@ export class App {
           ]
         : []),
       { label: t('editLocal'), onSelect: () => a.onEditLocal(id) },
-      { label: t('editOnGithub'), onSelect: () => a.onOpenLink(editUrl(settings, tip.path)) },
+      { label: t('showInFolder'), onSelect: () => a.onReveal(id) },
       {
         label: `${t('delete')}…`,
         onSelect: () =>
@@ -228,7 +226,7 @@ export class App {
     const board = state.board;
     if (!board) return;
     if (state.view.kind === 'settings') {
-      mount(this.back, renderSettings({ settings: board.settings, hasToken: board.has_token, actions: this.settingsActions() }));
+      mount(this.back, renderSettings({ settings: board.settings, actions: this.settingsActions() }));
       return;
     }
     if (state.view.kind === 'detail') {
@@ -258,7 +256,7 @@ export class App {
   private chromeActions() {
     return {
       onSync: () => void this.refresh('sync_now'),
-      onPushNow: () => void this.mutate(() => call('push_now'), 'push_now'),
+      onOpenFolder: () => void guard('open_folder', () => call('open_folder')),
       onSettings: () => this.store.set({ view: { kind: 'settings' } }),
       onToggleDone: () => {
         const s = this.store.get().board?.settings;
@@ -290,6 +288,7 @@ export class App {
         void guard('edit_local', () => call('edit_local', { id })).then((path) => {
           if (path) showNotice(t('openedIn'), path);
         }),
+      onReveal: (id: string) => void guard('reveal_tip', () => call('reveal_tip', { id })),
       onOpenLink: (url: string) => void guard('open link', () => openExternal(url)),
       onBack: () => this.back_(),
       resolveImage: this.resolveImage,
@@ -302,16 +301,8 @@ export class App {
         const board = await call('save_settings', { settings });
         this.applyBoard(board);
       },
-      onSetToken: async (token: string) => {
-        await call('set_token', { token });
-        await this.refresh('sync_now');
-      },
-      onClearToken: async () => {
-        await call('clear_token');
-        await this.refresh('get_state');
-      },
-      onTest: () => call('test_connection'),
-      onOpenLink: (url: string) => void guard('open link', () => openExternal(url)),
+      onPickFolder: () => call('pick_folder'),
+      onOpenFolder: () => call('open_folder'),
       onClose: () => this.back_(),
     };
   }

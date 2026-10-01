@@ -1,7 +1,7 @@
 [package]
 name = "vindictive"
 version = "0.3.0"
-description = "Always-on-top tile board of what to do next, synced with GitHub."
+description = "Always-on-top tile board of what to do next, kept as Markdown files in a folder you choose."
 authors = ["Wentao Zhang"]
 license = "MIT"
 repository = "https://github.com/Zwl20085/vindictive"
@@ -23,6 +23,7 @@ tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-log = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -30,7 +31,6 @@ serde_yaml = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 chrono = { version = "0.4", features = ["serde"] }
-keyring = { version = "3", features = ["windows-native"] }
 base64 = "0.22"
 thiserror = "2"
 roxmltree = "0.20"

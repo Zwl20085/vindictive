@@ -1,9 +1,10 @@
 //! Shared application state and the sync engine.
 //!
 //! Locking discipline: the mutex is held only for short, non-async sections.
-//! Network calls always happen on a cloned snapshot.
+//! File reads and writes always happen on a cloned snapshot.
 
 use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
@@ -12,13 +13,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use super::board::Board;
-use super::editor::EditSession;
-use super::secrets;
 use super::settings::Settings;
 use super::storage::Storage;
 use crate::core::nextup::{next_up, ordered};
 use crate::core::tip::Tip;
-use crate::sync::github::GithubClient;
+use crate::sync::folder::{FolderError, FolderStore};
 use crate::sync::weather::Weather;
 
 pub const EVENT_BOARD_UPDATED: &str = "board-updated";
@@ -36,10 +35,9 @@ pub struct Inner {
     pub image_cache: HashMap<String, String>,
     /// Last weather result and the place it was fetched for.
     pub weather: Option<(String, Weather)>,
-    /// Files open in the local editor, by tip id.
-    pub edits: HashMap<String, EditSession>,
-    /// When local edits were last pushed (scheduled or manual).
-    pub last_push: Option<NaiveDateTime>,
+    /// Files that could not be loaded, by path: the stamp that failed and
+    /// why. They are skipped until saved again and shown as a sync error.
+    pub broken: HashMap<String, (String, String)>,
 }
 
 pub struct AppState {
@@ -58,14 +56,8 @@ pub struct BoardState {
     pub last_sync: Option<NaiveDateTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync_error: Option<String>,
-    pub has_token: bool,
     pub settings: Settings,
     pub now: NaiveDateTime,
-    /// Local edits saved but not yet committed.
-    pub pending_edits: usize,
-    /// When the next scheduled push will run, if edits are pending.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_push: Option<NaiveDateTime>,
 }
 
 /// Local wall-clock time, truncated to whole seconds so it serialises as
@@ -81,11 +73,6 @@ impl AppState {
             settings: storage.load_settings(),
             board: Board::new(storage.load_cache()),
             fired: storage.load_fired(),
-            edits: storage
-                .load_edits()
-                .into_iter()
-                .map(|s| (s.id.clone(), s))
-                .collect(),
             ..Default::default()
         };
         Self {
@@ -115,7 +102,6 @@ impl AppState {
 
     pub fn snapshot(&self) -> BoardState {
         let now = now();
-        let has_token = secrets::get_token().ok().flatten().is_some();
         self.with(|i| {
             let open: Vec<Tip> = ordered(&i.board.tips, now).into_iter().cloned().collect();
             let hidden: Vec<Tip> = i
@@ -125,22 +111,13 @@ impl AppState {
                 .filter(|t| !open.iter().any(|o| o.id == t.id))
                 .cloned()
                 .collect();
-            let pending_edits = i.edits.values().filter(|s| s.pending.is_some()).count();
-            let next_push = if pending_edits > 0 {
-                super::editor::next_push_at(i.settings.push_interval_minutes, i.last_push)
-            } else {
-                None
-            };
             BoardState {
                 next_up: next_up(&i.board.tips, now),
                 tips: open.into_iter().chain(hidden).collect(),
                 last_sync: i.last_sync,
                 sync_error: i.sync_error.clone(),
-                has_token,
                 settings: i.settings.clone(),
                 now,
-                pending_edits,
-                next_push,
             }
         })
     }
@@ -151,14 +128,13 @@ impl AppState {
         }
     }
 
-    /// Build a GitHub client from current settings and the stored token.
-    pub fn client(&self) -> Result<GithubClient, String> {
+    /// The tips folder from current settings.
+    pub fn store(&self) -> Result<FolderStore, String> {
         let settings = self.settings();
         if !settings.is_configured() {
-            return Err("Set the tips repository in Settings first.".into());
+            return Err("Pick a tips folder in Settings first.".into());
         }
-        let token = secrets::get_token()?.ok_or("Add a GitHub token in Settings first.")?;
-        GithubClient::new(settings.repo_ref(), &token).map_err(|e| e.to_string())
+        FolderStore::open(Path::new(&settings.folder)).map_err(|e| e.to_string())
     }
 
     pub fn replace_board(&self, board: Board) {
@@ -213,65 +189,103 @@ impl AppState {
         self.with(|i| i.weather = Some((place.to_string(), weather)));
     }
 
-    /// Mutate the editor sessions and persist them.
-    pub fn update_edits(&self, f: impl FnOnce(&mut HashMap<String, EditSession>)) {
-        let snapshot: Vec<EditSession> = self.with(|i| {
-            f(&mut i.edits);
-            i.edits.values().cloned().collect()
-        });
-        if let Err(e) = self.storage.save_edits(&snapshot) {
-            log::warn!("edit sessions not saved: {e}");
-        }
-    }
-
-    /// Pull the remote listing and any changed files. Returns ids of tips
+    /// Rescan the folder and read any changed files. Returns ids of tips
     /// that were not on the board before (empty on the very first load).
+    /// The UI is only told when the board or the error state changed, so the
+    /// frequent rescans cost nothing while the folder is quiet.
     pub async fn sync<R: Runtime>(&self, app: &AppHandle<R>) -> Result<Vec<String>, String> {
-        if self.syncing.swap(true, Ordering::SeqCst) {
+        let Some(_running) = Running::start(&self.syncing) else {
             return Ok(Vec::new());
+        };
+        let result = self.sync_inner();
+        let error = match &result {
+            Err(e) => Some(e.clone()),
+            Ok(_) => self.with(|i| broken_summary(&i.broken)),
+        };
+        let error_changed = self.with(|i| {
+            let changed = i.sync_error != error;
+            i.sync_error = error.clone();
+            i.last_sync = Some(now());
+            changed
+        });
+        if let (Some(e), true) = (&error, error_changed) {
+            log::warn!("sync: {e}");
         }
-        let result = self.sync_inner().await;
-        self.syncing.store(false, Ordering::SeqCst);
-        match &result {
-            Ok(_) => self.with(|i| {
-                i.sync_error = None;
-                i.last_sync = Some(now());
-            }),
-            Err(e) => {
-                log::warn!("sync failed: {e}");
-                self.with(|i| i.sync_error = Some(e.clone()));
-            }
+        if matches!(&result, Ok((true, _))) || error_changed {
+            self.emit(app);
         }
-        self.emit(app);
-        result
+        result.map(|(_, new_ids)| new_ids)
     }
 
-    async fn sync_inner(&self) -> Result<Vec<String>, String> {
-        let client = self.client()?;
-        let (dir, board) = self.with(|i| (i.settings.dir.clone(), i.board.clone()));
-        let listing = client
-            .list_dir_or_empty(&dir)
-            .await
-            .map_err(|e| e.to_string())?;
-        let plan = board.plan(&listing);
+    /// `(board changed, ids of new tips)`.
+    fn sync_inner(&self) -> Result<(bool, Vec<String>), String> {
+        let store = self.store()?;
+        // Board first, listing second: a tip created in between is then in
+        // the listing (and read), never mistaken for a deleted one.
+        let seen = self.board();
+        let listing = store.list().map_err(|e| e.to_string())?;
+        let stamps: HashMap<&str, &str> = listing
+            .iter()
+            .map(|f| (f.path.as_str(), f.stamp.as_str()))
+            .collect();
+        // A broken file is retried once it changes (or is gone).
+        let broken = self.with(|i| {
+            i.broken
+                .retain(|path, (stamp, _)| stamps.get(path.as_str()) == Some(&stamp.as_str()));
+            i.broken.clone()
+        });
+        let mut plan = seen.plan(&listing);
+        plan.to_fetch.retain(|path| !broken.contains_key(path));
+        if plan.to_fetch.is_empty() && plan.removed.is_empty() {
+            return Ok((false, Vec::new()));
+        }
         let mut fetched = Vec::with_capacity(plan.to_fetch.len());
         for path in &plan.to_fetch {
-            let (text, sha) = client.get_text(path).await.map_err(|e| e.to_string())?;
-            match Tip::parse(path, Some(sha), &text) {
-                Ok(tip) => fetched.push(tip),
-                Err(e) => log::warn!("skipping {path}: {e}"),
+            let failed = match store.read_text(path) {
+                Ok((text, stamp)) => match Tip::parse(path, Some(stamp.clone()), &text) {
+                    Ok(tip) => {
+                        fetched.push(tip);
+                        continue;
+                    }
+                    Err(e) => (stamp, e.to_string()),
+                },
+                // Mid-write: the next scan reads the finished file.
+                Err(FolderError::Changing(_)) => continue,
+                Err(e) => (stamps[path.as_str()].to_string(), e.to_string()),
+            };
+            self.with(|i| i.broken.insert(path.clone(), failed));
+        }
+        let (changed, new_ids, tips) = self.with(|i| {
+            // Apply against the *current* board, skipping any tip a command
+            // wrote while the files above were read: that write is newer.
+            let current = &i.board;
+            let untouched = |path: &str| sha_of(current, path) == sha_of(&seen, path);
+            let fetched: Vec<Tip> = fetched.into_iter().filter(|t| untouched(&t.path)).collect();
+            let removed: Vec<String> = plan
+                .removed
+                .iter()
+                .filter(|p| untouched(p))
+                .cloned()
+                .collect();
+            let had_tips = !current.tips.is_empty();
+            let (next, new_ids) = current.apply(fetched, &removed);
+            let changed = next != *current;
+            if changed {
+                i.board = next;
+                i.image_cache.clear();
+            }
+            let new_ids = if had_tips { new_ids } else { Vec::new() };
+            (changed, new_ids, i.board.tips.clone())
+        });
+        if changed {
+            if let Err(e) = self.storage.save_cache(&tips) {
+                log::warn!("cache not saved: {e}");
             }
         }
-        // Merge into the *current* board: commands may have changed it while
-        // the network calls above were in flight.
-        let current = self.board();
-        let had_tips = !current.tips.is_empty();
-        let (next, new_ids) = current.apply(fetched, &plan.removed);
-        self.replace_board(next);
-        Ok(if had_tips { new_ids } else { Vec::new() })
+        Ok((changed, new_ids))
     }
 
-    /// Write a tip back to GitHub and update the board with its new SHA.
+    /// Write a tip to its file and update the board with the new stamp.
     pub async fn save_tip<R: Runtime>(
         &self,
         app: &AppHandle<R>,
@@ -291,19 +305,18 @@ impl AppState {
         text: &str,
         message: &str,
     ) -> Result<Tip, String> {
-        let client = self.client()?;
-        // Optimistic local update so the UI reacts immediately; undone below
-        // if GitHub does not take the write.
-        let previous = self.board().get(&tip.id).cloned();
-        self.replace_board(self.board().upsert(tip.clone()));
-        self.emit(app);
-        match client
-            .put_text(&tip.path, text, tip.sha.as_deref(), message)
-            .await
-        {
-            Ok(sha) => {
+        let store = self.store()?;
+        if let Some((_, reason)) = self.with(|i| i.broken.get(&tip.path).cloned()) {
+            return Err(format!(
+                "{} has an error; fix it in the editor and save first ({reason})",
+                tip.path
+            ));
+        }
+        log::info!("{message}");
+        match store.write_text(&tip.path, text, tip.sha.as_deref()) {
+            Ok(stamp) => {
                 let saved = Tip {
-                    sha: Some(sha),
+                    sha: Some(stamp),
                     ..tip
                 };
                 self.replace_board(self.board().upsert(saved.clone()));
@@ -311,27 +324,12 @@ impl AppState {
                 Ok(saved)
             }
             Err(e) => {
-                self.roll_back(&tip, previous);
-                self.emit(app);
+                // Usually a conflict: the file changed on disk. Reload it so
+                // the board shows the current version, then report.
                 let _ = self.sync(app).await;
                 Err(e.to_string())
             }
         }
-    }
-
-    /// Undo an optimistic `upsert` of `attempted` after a failed write, unless
-    /// something newer replaced it meanwhile. Without this an offline Done
-    /// would stay on the board (and in the cache) while GitHub still says open,
-    /// and the unchanged SHA would stop the next sync from correcting it.
-    fn roll_back(&self, attempted: &Tip, previous: Option<Tip>) {
-        let board = self.board();
-        if board.get(&attempted.id) != Some(attempted) {
-            return;
-        }
-        self.replace_board(match previous {
-            Some(tip) => board.upsert(tip),
-            None => board.remove(&attempted.id),
-        });
     }
 
     pub fn from_app<R: Runtime>(app: &AppHandle<R>) -> tauri::State<'_, AppState> {
@@ -339,48 +337,152 @@ impl AppState {
     }
 }
 
+/// Clears the "sync running" flag when dropped, even on a panic.
+struct Running<'a>(&'a AtomicBool);
+
+impl<'a> Running<'a> {
+    fn start(flag: &'a AtomicBool) -> Option<Self> {
+        (!flag.swap(true, Ordering::SeqCst)).then_some(Self(flag))
+    }
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+fn sha_of<'a>(board: &'a Board, path: &str) -> Option<&'a Option<String>> {
+    board.tips.iter().find(|t| t.path == path).map(|t| &t.sha)
+}
+
+/// One line about files that could not be loaded, for the sync dot.
+fn broken_summary(broken: &HashMap<String, (String, String)>) -> Option<String> {
+    let mut paths: Vec<&String> = broken.keys().collect();
+    paths.sort();
+    let first = paths.first()?;
+    let (_, reason) = &broken[*first];
+    let more = match paths.len() {
+        1 => String::new(),
+        n => format!(" (and {} more)", n - 1),
+    };
+    Some(format!("cannot load {first}: {reason}{more}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync::folder::FolderStore;
 
-    fn tip(id: &str, title: &str) -> Tip {
-        let text = format!("---\ntitle: {title}\n---\n");
-        Tip::parse(&format!("tips/{id}.md"), Some("sha1".into()), &text).unwrap()
-    }
-
-    fn state_with(tips: Vec<Tip>) -> (AppState, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let state = AppState::load(Storage::new(dir.path().to_path_buf()));
-        state.replace_board(Board::new(tips));
-        (state, dir)
-    }
-
-    #[test]
-    fn failed_write_restores_the_previous_tip() {
-        let before = tip("a", "Open");
-        let (state, _dir) = state_with(vec![before.clone()]);
-        let attempted = tip("a", "Done");
-        state.replace_board(state.board().upsert(attempted.clone()));
-        state.roll_back(&attempted, Some(before.clone()));
-        assert_eq!(state.board().get("a"), Some(&before));
+    fn state_in(folder: &Path, data: &Path) -> AppState {
+        let state = AppState::load(Storage::new(data.to_path_buf()));
+        let settings = Settings {
+            folder: folder.display().to_string(),
+            ..Default::default()
+        };
+        state.with(|i| i.settings = settings);
+        state
     }
 
     #[test]
-    fn failed_create_removes_the_new_tip() {
-        let (state, _dir) = state_with(vec![]);
-        let attempted = tip("new", "New");
-        state.replace_board(state.board().upsert(attempted.clone()));
-        state.roll_back(&attempted, None);
-        assert!(state.board().get("new").is_none());
+    fn scan_loads_changes_and_reports_quiet_folders() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        let store = FolderStore::open(folder.path()).unwrap();
+        store
+            .write_text(
+                "a.md",
+                "---
+title: A
+---
+",
+                None,
+            )
+            .unwrap();
+
+        let (changed, new_ids) = state.sync_inner().unwrap();
+        assert!(changed);
+        assert!(new_ids.is_empty(), "first load announces nothing");
+        assert_eq!(state.board().get("a").unwrap().front.title, "A");
+
+        assert_eq!(state.sync_inner().unwrap(), (false, vec![]));
+
+        store
+            .write_text(
+                "b.md",
+                "---
+title: B
+---
+",
+                None,
+            )
+            .unwrap();
+        assert_eq!(state.sync_inner().unwrap(), (true, vec!["b".to_string()]));
+
+        std::fs::remove_file(folder.path().join("a.md")).unwrap();
+        assert!(state.sync_inner().unwrap().0);
+        assert!(state.board().get("a").is_none());
     }
 
     #[test]
-    fn roll_back_keeps_a_newer_version() {
-        let (state, _dir) = state_with(vec![tip("a", "Open")]);
-        let attempted = tip("a", "Done");
-        let newer = tip("a", "Synced meanwhile");
-        state.replace_board(state.board().upsert(newer.clone()));
-        state.roll_back(&attempted, Some(tip("a", "Open")));
-        assert_eq!(state.board().get("a"), Some(&newer));
+    fn broken_files_are_skipped_until_saved_again() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        std::fs::write(
+            folder.path().join("bad.md"),
+            "---
+title: [unclosed
+---
+",
+        )
+        .unwrap();
+        state.sync_inner().unwrap();
+        assert!(state.board().get("bad").is_none());
+        assert_eq!(state.sync_inner().unwrap(), (false, vec![]));
+        let summary = state.with(|i| broken_summary(&i.broken)).unwrap();
+        assert!(summary.starts_with("cannot load bad.md"), "{summary}");
+        std::fs::write(
+            folder.path().join("bad.md"),
+            "---
+title: Fixed now
+---
+",
+        )
+        .unwrap();
+        state.sync_inner().unwrap();
+        assert_eq!(state.board().get("bad").unwrap().front.title, "Fixed now");
+        assert!(state.with(|i| i.broken.is_empty()));
+    }
+
+    #[test]
+    fn missing_folder_is_reported() {
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(&data.path().join("gone"), data.path());
+        assert!(state.sync_inner().is_err());
+        let unset = AppState::load(Storage::new(data.path().to_path_buf()));
+        assert!(unset.store().unwrap_err().contains("Settings"));
+    }
+
+    #[test]
+    fn non_utf8_files_are_reported_not_retried() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        std::fs::write(folder.path().join("gbk.md"), [0xC4u8, 0xE3, 0xBA, 0xC3]).unwrap();
+        state.sync_inner().unwrap();
+        assert!(state.with(|i| i.broken.contains_key("gbk.md")));
+        assert_eq!(state.sync_inner().unwrap(), (false, vec![]));
+    }
+
+    #[test]
+    fn running_flag_resets_on_drop() {
+        let flag = AtomicBool::new(false);
+        {
+            let _a = Running::start(&flag).unwrap();
+            assert!(Running::start(&flag).is_none());
+        }
+        assert!(Running::start(&flag).is_some());
     }
 }

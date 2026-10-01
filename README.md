@@ -5,7 +5,7 @@
 <h1 align="center">Vindictive</h1>
 
 <p align="center">
-  <strong>An always-on-top tile board that tells you what to do next. Synced with GitHub.</strong>
+  <strong>An always-on-top tile board that tells you what to do next. Tips live in a local folder, synced via OneDrive.</strong>
 </p>
 
 <p align="center">
@@ -26,8 +26,8 @@ above every other window, until you press Done.
 
 **Experiments do not wait for your to-do app.** When the thermal chamber is at
 temperature you have one hand free. `Ctrl+Shift+Space`, type a line, Enter.
-The tip is a Markdown file in your GitHub repo two seconds later, visible from
-your phone, your laptop, and the board.
+The tip is a Markdown file in your tips folder two seconds later. It syncs to
+your other PCs through OneDrive.
 
 **Reading queues rot.** Paste an arXiv id or a DOI and the tile fills itself
 with title, authors and year. The queue is a folder of files you can grep,
@@ -77,11 +77,11 @@ date / weather panel sits on top, and the whole UI is in English or 简体中文
   escalates green → amber → red → crimson as the date closes in. Countdowns,
   dates and every label are also available in Chinese.
 - **Native toasts.** Windows notifications fire at the remind times you wrote
-  in the file, once, and when a new tip arrives from the repo.
-- **GitHub-synced Markdown.** Each tip is a `.md` file with YAML frontmatter in
-  a private repo you own. Edit it in Obsidian, on github.com, from your phone,
-  or with `echo >>`. The app polls with conditional requests and writes back
-  when you press Done or Snooze.
+  in the file, once, and when a new tip shows up in the tips folder from
+  another PC.
+- **Local Markdown files.** Each tip is a `.md` file with YAML frontmatter in
+  your tips folder. Edit it in Obsidian, VS Code, or any editor; the app
+  rescans every few seconds and updates the board.
 - **Quick capture.** Global hotkey `Ctrl+Shift+Space` opens a one-line bar:
   `Check coil temp after run 3 #lab !high @tomorrow 09:30 ^"Lab 302"`.
 - **arXiv and DOI auto-fill.** `arxiv: 2401.12345` or `doi: 10.1109/...` in a
@@ -89,8 +89,8 @@ date / weather panel sits on top, and the whole UI is in English or 简体中文
 - **Recurring tips.** `repeat: weekly on mon at 10:00`. Pressing Done rolls the
   tip forward instead of closing it.
 - **Tray icon, autostart, dark and light themes.**
-- **Token stays local.** The GitHub token lives in Windows Credential Manager,
-  never in a config file or the repo.
+- **Private by default.** Tips never leave your PC except via your own OneDrive
+  (or any sync tool you choose). No tokens, no GitHub account needed.
 
 ## Quick start
 
@@ -104,26 +104,23 @@ The installer is not code-signed yet, so Windows SmartScreen may say
 *Windows protected your PC*. Click **More info → Run anyway**.
 
 **Updating.** From 0.3.0 on, right-click the tray icon → **Check for
-updates…**. Vindictive pushes any unsaved edits, downloads the newest signed
-installer from Releases, installs it and restarts. Copies older than 0.3.0 need
-one manual install of the new `setup.exe`.
+updates…**. Vindictive downloads the newest signed installer from Releases,
+installs it and restarts. Copies older than 0.3.0 need one manual install of
+the new `setup.exe`.
 
-### 2. Connect a tips repo (two minutes)
+### 2. Your tips folder (automatic)
 
-On first launch the board is empty and shows **Set up GitHub sync**. Click it:
+On first launch Vindictive picks a tips folder automatically:
+- If OneDrive is installed: `%OneDrive%\Vindictive`
+- Otherwise: `Documents\Vindictive`
 
-1. **Create repo ↗** opens GitHub's new-repository page pre-filled as a
-   private `vindictive-tips`. Tick *Add a README file* so the repo has a
-   branch, then **Create repository**.
-2. **Create token ↗** opens GitHub's fine-grained token page pre-filled with
-   *Contents: Read and write*. Under *Repository access* pick
-   `vindictive-tips`, then **Generate token** and copy it.
-3. Paste the repo URL (for example `https://github.com/you/vindictive-tips`)
-   into **Owner**, paste the token, press **Save token** and then **Save**.
+The folder is created if it doesn't exist. OneDrive keeps it in sync between
+every PC signed in to the same account; any other sync tool (Dropbox,
+Syncthing, a NAS share) works too, because the app only reads and writes files.
 
-That's the whole setup. The `tips/` folder is created by your first tip; press
-`Ctrl+Shift+Space` anywhere and type one. For a starter set, copy
-[`examples/tips/`](examples/tips) into the repo. Details and troubleshooting:
+To use a different folder, open Settings and change the path under **Tips
+folder**. To migrate from the GitHub version (0.2.x), copy the files from your
+old repo's `tips/` directory into the new tips folder. Details:
 [docs/SETUP.md](docs/SETUP.md).
 
 ### Try it without installing anything
@@ -191,7 +188,7 @@ tags: [ecce, paper]
 | `due` | `2026-10-15` or `2026-10-15 17:00` | bare date means 23:59 |
 | `remind` | list of `-30m` `-2h` `-1d` `-1w` or absolute times | relative to `due` |
 | `location` | text | shown on the tile and in detail |
-| `links`, `images`, `tags` | lists | images relative to the tips dir |
+| `links`, `images`, `tags` | lists | images relative to the tips folder |
 | `repeat` | recurrence rule, see below | Done rolls `due` forward |
 | `color` | any CSS colour | overrides the kind colour |
 | `arxiv`, `doi` | id | fills the `paper` block |
@@ -255,10 +252,10 @@ vindictive/
 │   │   ├── nextup.rs    scoring
 │   │   ├── deadline.rs  urgency levels
 │   │   └── capture.rs   quick-capture parser
-│   ├── sync/            GitHub Contents API, arXiv, Crossref
+│   ├── sync/            folder watcher, arXiv, Crossref, Open-Meteo
 │   └── app/             Tauri state, commands, scheduler, tray, windows
 ├── docs/                DESIGN.md, TIP-FORMAT.md, SETUP.md
-└── examples/tips/       starter tips for your private repo
+└── examples/tips/       starter tips for your tips folder
 ```
 
 The backend owns the truth. Every mutation is a command that returns the new

@@ -4,7 +4,6 @@ import { countdown, formatLocal, minutesUntilTomorrowMorning, parseNaive } from 
 import { DEADLINE_COLORS, KIND_COLORS, OVERDUE_COLOR, tileColor } from '../lib/tileColor';
 import { TILE_SIZES, tileSize, type TileSize } from '../lib/tileSize';
 import { isRelativeSrc, renderMarkdown, resolveImages, type ImageResolver } from '../lib/markdown';
-import { editUrl } from '../lib/github';
 import { el } from './dom';
 import { KIND_GLYPH, labelFor } from './glyphs';
 import { showLightbox } from './lightbox';
@@ -26,6 +25,8 @@ export interface DetailActions {
   onSetColor: (id: string, color: string | null) => void;
   onSetSize: (id: string, size: TileSize | null) => void;
   onOpenLink: (url: string) => void;
+  /** Show the tip's file in Explorer. */
+  onReveal: (id: string) => void;
   onBack: () => void;
   resolveImage: ImageResolver;
 }
@@ -218,7 +219,7 @@ function body(tip: Tip, resolveImage: ImageResolver): HTMLElement {
   return node;
 }
 
-function actionBar(tip: Tip, settings: Settings, now: Date, actions: DetailActions, panel: HTMLElement): HTMLElement {
+function actionBar(tip: Tip, now: Date, actions: DetailActions, panel: HTMLElement): HTMLElement {
   const button = (text: string, onClick: () => void, extra = ''): HTMLButtonElement => {
     const b = el('button', { className: `action ${extra}`.trim(), type: 'button', text });
     b.addEventListener('click', onClick);
@@ -257,7 +258,7 @@ function actionBar(tip: Tip, settings: Settings, now: Date, actions: DetailActio
     tip.status === 'open' ? button(t('snooze1h'), () => actions.onSnooze(tip.id, SNOOZE_HOUR_MINUTES)) : null,
     tip.status === 'open' ? button(t('tomorrow'), () => actions.onSnooze(tip.id, minutesUntilTomorrowMorning(now))) : null,
     button(t('editLocal'), () => actions.onEditLocal(tip.id)),
-    button(t('editOnGithub'), () => actions.onOpenLink(editUrl(settings, tip.path))),
+    button(t('showInFolder'), () => actions.onReveal(tip.id)),
     del,
     button(t('back'), actions.onBack, 'action-back'),
   );
@@ -265,7 +266,7 @@ function actionBar(tip: Tip, settings: Settings, now: Date, actions: DetailActio
 
 /** Render the flipped-open detail panel for one tip. */
 export function renderDetail(options: DetailOptions): HTMLElement {
-  const { tip, settings, now, actions, isNextUp = false } = options;
+  const { tip, now, actions, isNextUp = false } = options;
   const colour = tileColor(tip, now);
   const panel = el('section', { className: 'detail', role: 'dialog', 'aria-modal': 'true', 'aria-label': tip.title });
   panel.append(
@@ -280,7 +281,7 @@ export function renderDetail(options: DetailOptions): HTMLElement {
     ].filter(
       (n): n is HTMLElement => !!n,
     ),
-    actionBar(tip, settings, now, actions, panel),
+    actionBar(tip, now, actions, panel),
   );
   panel.style.setProperty('--tile-bg', colour.bg);
   panel.style.setProperty('--tile-fg', colour.fg);

@@ -32,14 +32,12 @@ const WEATHER_DELAY_MS = 600;
 interface MockStore {
   tips: Tip[];
   settings: Settings;
-  token: string | undefined;
   lastSync: string | undefined;
 }
 
 let store: MockStore = {
   tips: sampleTips(new Date()),
   settings: SAMPLE_SETTINGS,
-  token: 'mock-token',
   lastSync: toNaive(new Date()),
 };
 
@@ -74,10 +72,8 @@ function buildState(): BoardState {
     tips,
     next_up: next?.id,
     last_sync: store.lastSync,
-    has_token: !!store.token,
     settings: store.settings,
     now: toNaive(now),
-    pending_edits: 0,
   };
 }
 
@@ -114,7 +110,7 @@ function createTip(text: string): Tip {
   const id = `${toNaive(new Date()).slice(0, 10)}-${slug(title)}`;
   const priority = /!high\b/.test(text) ? 'high' : /!low\b/.test(text) ? 'low' : 'normal';
   const tags = Array.from(text.matchAll(/[#＃]([\w一-鿿]+)/g)).map((m) => m[1] ?? '');
-  return { id, path: `tips/${id}.md`, title, kind: 'task', priority, status: 'open', tags, body: '', remind_at: [] };
+  return { id, path: `${id}.md`, title, kind: 'task', priority, status: 'open', tags, body: '', remind_at: [] };
 }
 
 function mockWeather(location: string): Weather {
@@ -143,7 +139,6 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
     return update({ tips: replaceTip(id, (t) => ({ ...t, snoozed_until: until, snoozed_until_at: until })) });
   },
   create_tip: ({ text }) => update({ tips: [createTip(text), ...store.tips] }),
-  push_now: () => buildState(),
   fit_window: () => undefined,
   set_color: ({ id, color }) => update({ tips: replaceTip(id, (t) => ({ ...t, color: color ?? undefined })) }),
   set_order: ({ id, order }) => update({ tips: replaceTip(id, (t) => ({ ...t, order: order ?? undefined })) }),
@@ -151,8 +146,13 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
   edit_local: ({ id }) => {
     const tip = store.tips.find((t) => t.id === id);
     if (!tip) throw new Error(`no tip with id ${id}`);
-    return `C:\\Users\\you\\AppData\\Roaming\\dev.zhangwentao.vindictive\\edit\\${tip.path.replace(/\//g, '\\')}`;
+    return `${store.settings.folder}\\${tip.path.replace(/\//g, '\\')}`;
   },
+  reveal_tip: ({ id }) => {
+    if (!store.tips.some((t) => t.id === id)) throw new Error(`no tip with id ${id}`);
+  },
+  open_folder: () => undefined,
+  pick_folder: () => 'D:\\OneDrive\\Tips',
   delete_tip: ({ id }) => {
     if (!store.tips.some((t) => t.id === id)) throw new Error(`no tip with id ${id}`);
     return update({ tips: store.tips.filter((t) => t.id !== id) });
@@ -161,17 +161,6 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
     if (level === 'error') console.error(`[mock log] ${message}`);
   },
   save_settings: ({ settings }) => update({ settings: { ...settings } }),
-  set_token: ({ token }) => {
-    if (!token.trim()) throw new Error('token is empty');
-    store = { ...store, token };
-  },
-  clear_token: () => {
-    store = { ...store, token: undefined };
-  },
-  test_connection: () => {
-    if (!store.token) throw new Error('no token stored');
-    return `OK: ${store.tips.length} tips in ${store.settings.owner}/${store.settings.repo}/${store.settings.dir}`;
-  },
   fetch_image: ({ path }) => (/^(https?:|data:)/i.test(path) ? path : PLACEHOLDER_IMAGE),
   enrich_tip: ({ id }) => update({ tips: replaceTip(id, (t) => t) }),
   fetch_weather: async () => {
