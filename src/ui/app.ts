@@ -1,21 +1,22 @@
-import { call, onBoardUpdated, openExternal } from '../api';
+import { call, isTauri, onBoardUpdated, openExternal } from '../api';
 import type { TileSize } from '../lib/tileSize';
-import type { BoardState, Dock, Settings } from '../types';
+import type { BoardState, Dock, Settings, Tip, TipEdit } from '../types';
 import { setLocale, t } from '../lib/i18n';
-import { minutesUntilTomorrowMorning } from '../lib/time';
+import { devClawdMood } from '../mock/sample-tips';
 import { renderAddBar } from './addbar';
-import { SNOOZE_HOUR_MINUTES, SWATCHES } from './detail';
-import { showMenu, showSwatchMenu } from './menu';
+import { showMenu } from './menu';
 import { fitTitles, handleBoardKeys, renderBoard } from './board';
 import { renderChrome } from './chrome';
 import { renderDetail } from './detail';
 import { el, mount } from './dom';
+import { renderEditForm } from './edit-form';
 import { errorLine, guard, showError, showNotice } from './errors';
 import { cachedResolver } from './images';
 import { closeLightbox, isLightboxOpen } from './lightbox';
 import { Panel } from './panel';
 import { renderSettings } from './settings';
 import { Store, type UiState } from './store';
+import { tileMenuItems } from './tile-menu';
 
 /** First-load retries while the backend finishes starting. */
 export const STARTUP_ATTEMPTS = 20;
@@ -43,6 +44,7 @@ export class App {
     this.stage.append(this.front, this.back);
     mount(this.root, el('div', { className: 'chrome-slot' }), errorLine(), this.panel.element, this.stage);
     this.panel.start();
+    if (!isTauri()) this.panel.forceClawd(devClawdMood());
     // Chrome and panel are cheap and update on every change; the tile faces
     // are rebuilt only when the board or the view changes (and on the tick),
     // so weather / sync updates never interrupt a running tile animation.
@@ -75,7 +77,7 @@ export class App {
     document.documentElement.style.setProperty('--alpha', String(Math.min(100, Math.max(20, board.settings.window_opacity || 100)) / 100));
     setLocale(board.settings.language);
     const view = this.store.get().view;
-    const stillExists = view.kind !== 'detail' || board.tips.some((t) => t.id === view.id);
+    const stillExists = !('id' in view) || board.tips.some((t) => t.id === view.id);
     this.store.set({ board, sync: board.sync_error ? 'error' : 'ok', view: stillExists ? view : { kind: 'board' } });
     void this.loadWeather(false);
   }
@@ -140,6 +142,7 @@ export class App {
   private onKey(event: KeyboardEvent): void {
     if (isLightboxOpen()) return; // the lightbox handles Esc itself
     const { view, adding } = this.store.get();
+    if (view.kind === 'edit') return; // the edit form handles Esc and Ctrl+Enter
     const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
     if (event.key === 'Escape' && view.kind !== 'board') {
       this.back_();
@@ -159,39 +162,7 @@ export class App {
   /** Right-click menu on a tile: the detail actions without flipping. */
   private tileMenu(id: string, x: number, y: number): void {
     const tip = this.store.get().board?.tips.find((t) => t.id === id);
-    if (!tip) return;
-    const a = this.detailActions();
-    const open = tip.status === 'open';
-    showMenu(x, y, [
-      open ? { label: t('done'), onSelect: () => a.onDone(id) } : { label: t('reopen'), onSelect: () => a.onReopen(id) },
-      ...(open
-        ? [
-            { label: t('snooze1h'), onSelect: () => a.onSnooze(id, SNOOZE_HOUR_MINUTES) },
-            { label: t('tomorrow'), onSelect: () => a.onSnooze(id, minutesUntilTomorrowMorning(new Date())) },
-          ]
-        : []),
-      {
-        label: `${t('colour')}…`,
-        onSelect: () =>
-          showSwatchMenu(x, y, {
-            swatches: SWATCHES,
-            current: tip.color,
-            autoLabel: t('auto'),
-            customLabel: t('customColour'),
-            onPick: (color) => a.onSetColor(id, color),
-          }),
-      },
-      { label: t('editLocal'), onSelect: () => a.onEditLocal(id) },
-      { label: t('showInFolder'), onSelect: () => a.onReveal(id) },
-      {
-        label: `${t('delete')}…`,
-        onSelect: () =>
-          showMenu(x, y, [
-            { label: `${t('deleteTip')}: ${tip.title}`, onSelect: () => a.onDelete(id) },
-            { label: t('cancel'), onSelect: () => undefined },
-          ]),
-      },
-    ]);
+    if (tip) showMenu(x, y, tileMenuItems(tip, this.detailActions(), x, y));
   }
 
   private renderChrome(state: UiState): void {
@@ -205,6 +176,7 @@ export class App {
       language: state.board?.settings.language ?? 'en',
       weather: state.weather,
       weatherStatus: state.weatherStatus,
+      tips: state.board?.tips,
     });
   }
 
@@ -266,12 +238,48 @@ export class App {
       mount(this.back, renderSettings({ settings: board.settings, actions: this.settingsActions() }));
       return;
     }
+    if (state.view.kind === 'edit') {
+      this.renderEdit(board, state.view.id);
+      return;
+    }
     if (state.view.kind === 'detail') {
       const id = state.view.id;
       const tip = board.tips.find((t) => t.id === id);
       if (tip) mount(this.back, renderDetail({ tip, settings: board.settings, now, actions: this.detailActions(), isNextUp: tip.id === board.next_up }));
       return;
     }
+  }
+
+  /**
+   * The edit form is mounted once and then left alone: folder rescans and the
+   * countdown tick must not wipe what the user is typing. A change to the
+   * file on disk surfaces as a conflict when saving.
+   */
+  private renderEdit(board: BoardState, id: string): void {
+    const mounted = this.back.querySelector<HTMLElement>('.edit-form');
+    if (mounted?.dataset.editing === id) return;
+    const tip = board.tips.find((t) => t.id === id);
+    if (tip) mount(this.back, renderEditForm({ tip, actions: this.editActions(tip) }));
+  }
+
+  private editActions(tip: Tip) {
+    const id = tip.id;
+    // The stamp the form starts from: a newer file on disk is a conflict.
+    // After a failed save the form adopts the current stamp, so saving
+    // again (as the conflict message suggests) is a deliberate overwrite.
+    let base = tip.sha ?? null;
+    return {
+      onSave: async (edit: TipEdit) => {
+        try {
+          this.applyBoard(await call('update_tip', { id, base, edit }));
+        } catch (error) {
+          base = this.store.get().board?.tips.find((t) => t.id === id)?.sha ?? base;
+          throw error;
+        }
+        this.store.set({ view: { kind: 'detail', id } });
+      },
+      onCancel: () => this.store.set({ view: { kind: 'detail', id } }),
+    };
   }
 
   private back_(): void {
@@ -321,6 +329,7 @@ export class App {
       onDelete: (id: string) => void this.mutate(() => call('delete_tip', { id }), 'delete_tip').then(() => this.back_()),
       onSetColor: (id: string, color: string | null) => void this.mutate(() => call('set_color', { id, color }), 'set_color'),
       onSetSize: (id: string, size: TileSize | null) => void this.mutate(() => call('set_size', { id, size }), 'set_size'),
+      onEdit: (id: string) => this.store.set({ view: { kind: 'edit', id } }),
       onEditLocal: (id: string) =>
         void guard('edit_local', () => call('edit_local', { id })).then((path) => {
           if (path) showNotice(t('openedIn'), path);

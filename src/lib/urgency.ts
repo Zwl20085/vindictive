@@ -1,4 +1,4 @@
-import type { Urgency } from '../types';
+import type { Tip, Urgency } from '../types';
 import { DAY_MS, HOUR_MS, parseNaive } from './time';
 
 /** Same thresholds as `src-tauri/src/core/deadline.rs`. */
@@ -17,4 +17,10 @@ export function urgencyOf(due: Date | undefined, now: Date): Urgency {
 /** Convenience for the naive string the backend sends. */
 export function urgencyOfNaive(dueAt: string | undefined, now: Date): Urgency {
   return urgencyOf(parseNaive(dueAt), now);
+}
+
+/** True while the tip's snooze has not run out yet. */
+export function isSnoozed(tip: Tip, now: Date): boolean {
+  const until = parseNaive(tip.snoozed_until_at);
+  return !!until && until > now;
 }

@@ -1,11 +1,12 @@
 /**
  * The status panel above the board: clock, date and weather, with Clawd
- * pacing between them. Owns one
+ * pacing between them and reacting to the tips. Owns one
  * element and updates it in place, so the clock can tick every second
  * without re-rendering the board.
  */
-import type { Language, Weather } from '../types';
+import type { Language, Tip, Weather } from '../types';
 import { formatPanelDate, t } from '../lib/i18n';
+import type { ClawdMood } from '../lib/mood';
 import { formatClock } from '../lib/time';
 import { formatTemperature, weatherLook } from '../lib/weather';
 import { Clawd } from './clawd';
@@ -18,6 +19,8 @@ export interface PanelData {
   language: Language;
   weather?: Weather;
   weatherStatus: WeatherStatus;
+  /** Every tip of the board, for Clawd's mood; `undefined` before the first load. */
+  tips?: readonly Tip[];
 }
 
 export const CLOCK_TICK_MS = 1000;
@@ -64,11 +67,17 @@ export class Panel {
     this.clawd.update(now);
   }
 
+  /** Hold Clawd in one mood (dev screenshots); `undefined` releases him. */
+  forceClawd(mood: ClawdMood | undefined): void {
+    this.clawd.force(mood);
+  }
+
   update(data: PanelData): void {
     this.language = data.language;
     this.element.hidden = !data.visible;
     this.element.dataset.weather = data.weatherStatus;
     this.tick();
+    this.clawd.setTips(data.tips, new Date());
     const w = data.weather;
     if (data.weatherStatus === 'ok' && w) {
       const look = weatherLook(w.code, w.is_day);

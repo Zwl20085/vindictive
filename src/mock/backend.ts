@@ -2,7 +2,7 @@
  * In-memory stand-in for the Rust backend. Used only when the page runs
  * outside Tauri. Every mutation produces new arrays; nothing is mutated.
  */
-import type { BoardState, Commands, Events, Settings, Tip, Weather } from '../types';
+import type { BoardState, Commands, Events, Settings, Tip, TipEdit, Weather } from '../types';
 import { MINUTE_MS, parseNaive, toNaive } from '../lib/time';
 import { urgencyOf } from '../lib/urgency';
 import { SAMPLE_SETTINGS, sampleTips } from './sample-tips';
@@ -28,6 +28,8 @@ const PLACEHOLDER_SVG =
 const PLACEHOLDER_IMAGE = 'data:image/svg+xml;utf8,' + encodeURIComponent(PLACEHOLDER_SVG);
 
 const WEATHER_DELAY_MS = 600;
+/** A bare due date means the end of that day, as in `core/timeparse.rs`. */
+const END_OF_DAY = 'T23:59:00';
 
 interface MockStore {
   tips: Tip[];
@@ -84,10 +86,13 @@ function update(patch: Partial<MockStore>): BoardState {
   return state;
 }
 
+let stamps = 0;
+
+/** Every write gives the tip a new file stamp, like the real folder store. */
 function replaceTip(id: string, fn: (tip: Tip) => Tip): Tip[] {
   const found = store.tips.some((t) => t.id === id);
   if (!found) throw new Error(`no tip with id ${id}`);
-  return store.tips.map((t) => (t.id === id ? fn(t) : t));
+  return store.tips.map((t) => (t.id === id ? { ...fn(t), sha: `mock-${++stamps}` } : t));
 }
 
 function slug(text: string): string {
@@ -111,6 +116,27 @@ function createTip(text: string): Tip {
   const priority = /!high\b/.test(text) ? 'high' : /!low\b/.test(text) ? 'low' : 'normal';
   const tags = Array.from(text.matchAll(/[#＃]([\w一-鿿]+)/g)).map((m) => m[1] ?? '');
   return { id, path: `${id}.md`, title, kind: 'task', priority, status: 'open', tags, body: '', remind_at: [] };
+}
+
+/** The mock's version of `core/edit.rs`: same rules, fewer checks. */
+function applyEdit(tip: Tip, base: string | null, edit: TipEdit): Tip {
+  if ((tip.sha ?? null) !== base) throw new Error(`${tip.path} changed on disk since it was loaded; reloaded, please retry`);
+  const title = edit.title.trim();
+  if (!title) throw new Error('a tip needs a title');
+  const due = edit.due?.trim() || undefined;
+  const dueAt = due ? parseNaive(due.includes(':') ? due : `${due}${END_OF_DAY}`) : undefined;
+  if (due && !dueAt) throw new Error(`"${due}" is not a date; use YYYY-MM-DD, optionally followed by HH:MM`);
+  return {
+    ...tip,
+    title,
+    kind: edit.kind,
+    priority: edit.priority,
+    due,
+    due_at: dueAt ? toNaive(dueAt) : undefined,
+    location: edit.location?.trim() || undefined,
+    tags: edit.tags,
+    body: edit.body,
+  };
 }
 
 function mockWeather(location: string): Weather {
@@ -142,6 +168,7 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
   fit_window: () => undefined,
   set_color: ({ id, color }) => update({ tips: replaceTip(id, (t) => ({ ...t, color: color ?? undefined })) }),
   set_order: ({ id, order }) => update({ tips: replaceTip(id, (t) => ({ ...t, order: order ?? undefined })) }),
+  update_tip: ({ id, base, edit }) => update({ tips: replaceTip(id, (t) => applyEdit(t, base, edit)) }),
   set_size: ({ id, size }) => update({ tips: replaceTip(id, (t) => ({ ...t, size: size ?? undefined })) }),
   edit_local: ({ id }) => {
     const tip = store.tips.find((t) => t.id === id);

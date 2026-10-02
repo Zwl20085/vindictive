@@ -1,0 +1,484 @@
+/* Clawd: a pixel companion pacing between the clock and the weather.
+   The SVG is 16 x 11 units drawn at 2.5 px per unit; inside it, CSS px
+   in transforms are grid units. `data-mood` on the track picks the pose:
+   walking (default), worried, relaxed, celebrating or sleeping.
+   The track always keeps room for the sprite. The walker spans the free
+   width left beside the sprite (up to a limit), so pacing by +-50% of its
+   own width uses exactly that room. */
+.clawd-track {
+  --clawd-clay: #d97757;
+  --clawd-ink: #1f1e1d;
+  --clawd-sweat: #8fd0f5;
+  --clawd-blush: #f2a08a;
+  --clawd-width: 40px;
+  --clawd-max-stride: 64px;
+  flex: 1 0 calc(var(--clawd-width) + 8px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  padding-bottom: 1px;
+}
+
+.clawd-walker {
+  display: flex;
+  justify-content: center;
+  width: clamp(0px, 100% - var(--clawd-width), var(--clawd-max-stride));
+  animation: clawd-pace 16s ease-in-out infinite;
+}
+
+.clawd-sprite {
+  flex: 0 0 auto;
+  position: relative;
+  display: block;
+  width: var(--clawd-width);
+  height: 27.5px;
+  cursor: pointer;
+}
+
+.clawd {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transform-origin: 50% 100%;
+}
+
+.clawd-body rect,
+.clawd-arms rect {
+  fill: var(--clawd-clay);
+}
+
+.clawd-legs rect {
+  fill: var(--clawd-clay);
+  filter: brightness(0.82);
+}
+
+.clawd-eyes rect,
+.clawd-face rect {
+  fill: var(--clawd-ink);
+}
+
+.clawd-sweat rect {
+  fill: var(--clawd-sweat);
+}
+
+.clawd-blush rect {
+  fill: var(--clawd-blush);
+}
+
+/* Parts only some moods draw. */
+.clawd-arms-up,
+.clawd-face,
+.clawd-blush,
+.clawd-sweat {
+  display: none;
+}
+
+.clawd-figure {
+  animation: clawd-bob 0.5s steps(2, jump-none) infinite;
+}
+
+.clawd-legs-a {
+  animation: clawd-step 0.5s steps(1, end) infinite;
+}
+
+.clawd-legs-b {
+  animation: clawd-step 0.5s steps(1, end) infinite reverse;
+}
+
+.clawd-eyes,
+.clawd-eyes-worried {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: clawd-blink 4.5s infinite;
+}
+
+.clawd-heart,
+.clawd-z,
+.clawd-note,
+.clawd-confetti {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.clawd-heart {
+  color: var(--clawd-clay);
+}
+
+.clawd-z,
+.clawd-note {
+  left: 85%;
+  top: -6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-family: var(--font-title);
+}
+
+.clawd-note {
+  left: 12%;
+  top: -2px;
+  font-size: 11px;
+}
+
+.clawd-confetti {
+  top: -3px;
+  width: 3px;
+  height: 3px;
+  background: var(--c);
+}
+
+/* No room next to the clock: Clawd steps out rather than overlap it. */
+@container panel (max-width: 220px) {
+  .clawd-track {
+    display: none;
+  }
+}
+
+/* Click: hop with a heart. */
+.clawd-hopping .clawd-sprite {
+  animation: clawd-hop 0.7s ease-out;
+}
+
+.clawd-hopping .clawd-heart {
+  animation: clawd-float 0.7s ease-out;
+}
+
+/* Worried: brows up, a frown, a sweat drop, quicker steps and a shiver now
+   and then. Three or more overdue tips (level 2) make it a little faster. */
+.clawd-track[data-mood='worried'] .clawd-walker {
+  animation-duration: 10s;
+}
+
+.clawd-track[data-mood='worried'] .clawd-eyes {
+  display: none;
+}
+
+.clawd-track[data-mood='worried'] .clawd-eyes-worried,
+.clawd-track[data-mood='worried'] .clawd-brows,
+.clawd-track[data-mood='worried'] .clawd-frown,
+.clawd-track[data-mood='worried'] .clawd-sweat {
+  display: inline;
+}
+
+.clawd-track[data-mood='worried'] .clawd-sweat {
+  animation: clawd-sweat 2.6s ease-in infinite;
+}
+
+.clawd-track[data-mood='worried'] .clawd {
+  animation: clawd-fret 3.2s linear infinite;
+}
+
+.clawd-track[data-mood='worried'][data-level='2'] .clawd-walker {
+  animation-duration: 7s;
+}
+
+.clawd-track[data-mood='worried'][data-level='2'] .clawd-sweat {
+  animation-duration: 1.8s;
+}
+
+.clawd-track[data-mood='worried'][data-level='2'] .clawd {
+  animation-duration: 2.2s;
+}
+
+/* Relaxed: nothing left to do. He sits in the middle, breathes slowly,
+   smiles, blinks lazily and hums a note now and then. */
+.clawd-track[data-mood='relaxed'] .clawd-walker,
+.clawd-track[data-mood='relaxed'] .clawd-figure,
+.clawd-track[data-mood='relaxed'] .clawd-legs {
+  animation: none;
+}
+
+.clawd-track[data-mood='relaxed'] .clawd-upper {
+  transform: translateY(2px);
+  animation: clawd-breathe 4s steps(1, end) infinite;
+}
+
+.clawd-track[data-mood='relaxed'] .clawd-smile,
+.clawd-track[data-mood='relaxed'] .clawd-blush {
+  display: inline;
+}
+
+.clawd-track[data-mood='relaxed'] .clawd-eyes {
+  animation: clawd-slow-blink 6s ease-in-out infinite;
+}
+
+.clawd-track[data-mood='relaxed'] .clawd-note {
+  animation: clawd-hum 7s ease-out infinite;
+}
+
+/* Celebrating: a tip was just completed. He stops where he is, throws his
+   arms up, squeezes his eyes shut and bounces while confetti flies. */
+.clawd-track[data-mood='celebrating'] .clawd-walker {
+  animation-play-state: paused;
+}
+
+.clawd-track[data-mood='celebrating'] .clawd-figure,
+.clawd-track[data-mood='celebrating'] .clawd-legs {
+  animation: none;
+}
+
+.clawd-track[data-mood='celebrating'] .clawd-arms-rest,
+.clawd-track[data-mood='celebrating'] .clawd-eyes {
+  display: none;
+}
+
+.clawd-track[data-mood='celebrating'] .clawd-arms-up,
+.clawd-track[data-mood='celebrating'] .clawd-eyes-happy,
+.clawd-track[data-mood='celebrating'] .clawd-cheer,
+.clawd-track[data-mood='celebrating'] .clawd-blush {
+  display: inline;
+}
+
+.clawd-track[data-mood='celebrating'] .clawd-arms-up {
+  animation: clawd-step 0.31s steps(1, end) infinite;
+}
+
+.clawd-track[data-mood='celebrating'] .clawd {
+  animation: clawd-cheer 0.62s ease-in-out infinite;
+}
+
+.clawd-track[data-mood='celebrating'] .clawd-confetti {
+  animation: clawd-confetti 1.24s ease-out infinite;
+  animation-delay: calc(var(--i) * 0.1s);
+}
+
+.clawd-track[data-mood='celebrating'] .clawd-heart {
+  animation: clawd-float 1.24s ease-out infinite;
+}
+
+/* Night: stop, close the eyes, float a z. */
+.clawd-track[data-mood='sleeping'] .clawd-walker,
+.clawd-track[data-mood='sleeping'] .clawd-figure,
+.clawd-track[data-mood='sleeping'] .clawd-legs {
+  animation: none;
+}
+
+.clawd-track[data-mood='sleeping'] .clawd-eyes {
+  animation: none;
+  transform: scaleY(0.25) translateY(2px);
+}
+
+.clawd-track[data-mood='sleeping'] .clawd-z {
+  animation: clawd-float 2.4s ease-out infinite;
+}
+
+@keyframes clawd-pace {
+  0%,
+  6% {
+    transform: translateX(-50%) scaleX(1);
+  }
+  42%,
+  50% {
+    transform: translateX(50%) scaleX(1);
+  }
+  52%,
+  56% {
+    transform: translateX(50%) scaleX(-1);
+  }
+  92%,
+  98% {
+    transform: translateX(-50%) scaleX(-1);
+  }
+  100% {
+    transform: translateX(-50%) scaleX(1);
+  }
+}
+
+@keyframes clawd-bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-0.5px);
+  }
+}
+
+@keyframes clawd-step {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes clawd-blink {
+  0%,
+  93%,
+  100% {
+    transform: scaleY(1);
+  }
+  95%,
+  97% {
+    transform: scaleY(0.15);
+  }
+}
+
+@keyframes clawd-slow-blink {
+  0%,
+  62%,
+  100% {
+    transform: scaleY(1);
+  }
+  72%,
+  86% {
+    transform: scaleY(0.15);
+  }
+}
+
+@keyframes clawd-breathe {
+  0% {
+    transform: translateY(2px);
+  }
+  50% {
+    transform: translateY(1.6px);
+  }
+}
+
+@keyframes clawd-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-8px);
+  }
+  60% {
+    transform: translateY(0);
+  }
+  75% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes clawd-cheer {
+  0%,
+  100% {
+    transform: translateY(0) scale(1.08, 0.86);
+  }
+  18% {
+    transform: translateY(-5px) scale(0.94, 1.08);
+  }
+  45% {
+    transform: translateY(-10px) scale(1, 1);
+  }
+  72% {
+    transform: translateY(-4px) scale(0.96, 1.05);
+  }
+  88% {
+    transform: translateY(0) scale(1, 1);
+  }
+}
+
+/* A short shiver at the start of every cycle, then stillness. */
+@keyframes clawd-fret {
+  0%,
+  14%,
+  100% {
+    transform: translateX(0);
+  }
+  2%,
+  6%,
+  10% {
+    transform: translateX(-1px);
+  }
+  4%,
+  8%,
+  12% {
+    transform: translateX(1px);
+  }
+}
+
+@keyframes clawd-sweat {
+  0% {
+    opacity: 0;
+    transform: translateY(-1px);
+  }
+  15%,
+  55% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  85%,
+  100% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+@keyframes clawd-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.6);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -12px) scale(1);
+  }
+}
+
+@keyframes clawd-hum {
+  0%,
+  55%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0) rotate(-8deg);
+  }
+  65% {
+    opacity: 0.9;
+  }
+  90% {
+    opacity: 0;
+    transform: translate(-90%, -11px) rotate(8deg);
+  }
+}
+
+@keyframes clawd-confetti {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, 0) rotate(0deg) scale(0.6);
+  }
+  45% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--dx) * 0.75), var(--dy)) rotate(150deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx)), calc(var(--dy) + 12px)) rotate(320deg) scale(1);
+  }
+}
+
+/* No motion: every mood keeps its pose, only the animation stops. */
+@media (prefers-reduced-motion: reduce) {
+  .clawd-track .clawd-walker,
+  .clawd-track .clawd,
+  .clawd-track .clawd-figure,
+  .clawd-track .clawd-upper,
+  .clawd-track .clawd-legs,
+  .clawd-track .clawd-arms,
+  .clawd-track .clawd-eyes,
+  .clawd-track .clawd-eyes-worried,
+  .clawd-track .clawd-sweat,
+  .clawd-track .clawd-note,
+  .clawd-track .clawd-confetti,
+  .clawd-track .clawd-heart,
+  .clawd-track .clawd-z,
+  .clawd-hopping .clawd-sprite {
+    animation: none;
+  }
+
+  .clawd-track[data-mood='sleeping'] .clawd-z,
+  .clawd-track[data-mood='relaxed'] .clawd-note {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

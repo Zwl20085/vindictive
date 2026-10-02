@@ -5,7 +5,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Manager};
 
 use super::state::AppState;
-use super::{updater, windows};
+use super::{peek, updater, windows};
 
 const ID_SHOW: &str = "show";
 const ID_SYNC: &str = "sync";
@@ -50,7 +50,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                if let Err(e) = windows::toggle_main(tray.app_handle()) {
+                let app = tray.app_handle();
+                let settings = AppState::from_app(app).settings();
+                if let Err(e) = peek::toggle(app, &settings) {
                     log::warn!("{e}");
                 }
             }

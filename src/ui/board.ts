@@ -2,7 +2,7 @@ import type { BoardState, Tip } from '../types';
 import { t } from '../lib/i18n';
 import type { ImageResolver } from '../lib/markdown';
 import { applyManualOrder, orderForMove } from '../lib/order';
-import { parseNaive } from '../lib/time';
+import { isSnoozed } from '../lib/urgency';
 import { el, mount } from './dom';
 import { renderTile } from './tile';
 
@@ -32,11 +32,6 @@ export interface BoardOptions {
 export function clampColumns(value: number | undefined): number {
   if (!value || Number.isNaN(value)) return DEFAULT_COLUMNS;
   return Math.min(MAX_COLUMNS, Math.max(MIN_COLUMNS, Math.round(value)));
-}
-
-function isSnoozed(tip: Tip, now: Date): boolean {
-  const until = parseNaive(tip.snoozed_until_at);
-  return !!until && until > now;
 }
 
 /** Tips the board should show, honouring the "show done" setting and manual order. */

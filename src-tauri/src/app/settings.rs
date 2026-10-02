@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use std::path::Path;
 
+use tauri_plugin_global_shortcut::Shortcut;
+
 use crate::sync::weather::MAX_LOCATION_CHARS;
 
 pub const MIN_COLUMNS: u32 = 2;
@@ -46,7 +48,11 @@ pub struct Settings {
     /// Absolute path of the folder holding the tip files, normally inside
     /// OneDrive. Empty until the first start fills in the default.
     pub folder: String,
+    /// Global shortcut for quick capture.
     pub hotkey: String,
+    /// Global shortcut that "peeks" at the board (raises it above other
+    /// windows when it lives on the bottom layer); blank turns it off.
+    pub board_hotkey: String,
     pub dock: Dock,
     pub always_on_top: bool,
     /// Keep the board beneath every other window (desktop widget style).
@@ -70,6 +76,9 @@ pub struct Settings {
     pub fit_height: bool,
     /// Background opacity of the whole window, percent (20..=100). Text stays solid.
     pub window_opacity: u8,
+    /// Look for a new release in the background and say so with a toast.
+    /// Installing stays a manual step (tray: "Check for updates…").
+    pub auto_update_check: bool,
 }
 
 impl Default for Settings {
@@ -77,6 +86,7 @@ impl Default for Settings {
         Self {
             folder: String::new(),
             hotkey: "Ctrl+Shift+Space".into(),
+            board_hotkey: "Ctrl+Alt+Shift+Space".into(),
             dock: Dock::Right,
             always_on_top: false,
             always_on_bottom: true,
@@ -91,6 +101,7 @@ impl Default for Settings {
             editor_command: "code".into(),
             fit_height: true,
             window_opacity: 50,
+            auto_update_check: true,
         }
     }
 }
@@ -133,9 +144,12 @@ impl Settings {
         if s.hotkey.is_empty() {
             return Err("hotkey cannot be empty".into());
         }
-        s.hotkey
-            .parse::<tauri_plugin_global_shortcut::Shortcut>()
-            .map_err(|e| format!("hotkey {:?} is not valid: {e}", s.hotkey))?;
+        let capture = parse_shortcut("hotkey", &s.hotkey)?;
+        s.board_hotkey = s.board_hotkey.trim().to_string();
+        if !s.board_hotkey.is_empty() && parse_shortcut("board hotkey", &s.board_hotkey)? == capture
+        {
+            return Err("the board hotkey must be different from the capture hotkey".into());
+        }
         s.weather_location = s
             .weather_location
             .trim()
@@ -153,6 +167,11 @@ impl Settings {
         }
         Ok(s)
     }
+}
+
+fn parse_shortcut(what: &str, text: &str) -> Result<Shortcut, String> {
+    text.parse::<Shortcut>()
+        .map_err(|e| format!("{what} {text:?} is not valid: {e}"))
 }
 
 #[cfg(test)]
@@ -197,6 +216,46 @@ mod tests {
             ..Default::default()
         };
         assert!(s.validated().is_err());
+    }
+
+    #[test]
+    fn board_hotkey_is_optional_but_must_parse_and_differ() {
+        let s = Settings::default().validated().unwrap();
+        assert_eq!(s.board_hotkey, "Ctrl+Alt+Shift+Space");
+        let off = Settings {
+            board_hotkey: "   ".into(),
+            ..Default::default()
+        }
+        .validated()
+        .unwrap();
+        assert_eq!(off.board_hotkey, "", "blank turns the peek hotkey off");
+        let bad = Settings {
+            board_hotkey: "Ctrl+Banana".into(),
+            ..Default::default()
+        };
+        assert!(bad.validated().is_err());
+        let same = Settings {
+            hotkey: "Ctrl+Shift+K".into(),
+            board_hotkey: " ctrl+shift+k ".into(),
+            ..Default::default()
+        };
+        let err = same.validated().unwrap_err();
+        assert!(err.contains("different"), "{err}");
+    }
+
+    #[test]
+    fn settings_from_0_3_get_the_new_keys() {
+        let s: Settings = serde_json::from_str(
+            r#"{"folder":"D:/tips","hotkey":"Ctrl+Shift+Space","always_on_bottom":true,"window_opacity":50}"#,
+        )
+        .unwrap();
+        assert_eq!(s.board_hotkey, "Ctrl+Alt+Shift+Space");
+        assert!(s.auto_update_check);
+        assert!(s.validated().is_ok());
+        let off: Settings =
+            serde_json::from_str(r#"{"auto_update_check":false,"board_hotkey":""}"#).unwrap();
+        assert!(!off.auto_update_check);
+        assert_eq!(off.validated().unwrap().board_hotkey, "");
     }
 
     #[test]

@@ -14,20 +14,37 @@ use super::notify;
 /// Set while a check or install runs, so repeated clicks do nothing.
 static BUSY: AtomicBool = AtomicBool::new(false);
 
+/// Holds the "checking for updates" flag; dropping it clears the flag, so a
+/// failed or panicking check never blocks the next one.
+pub struct Busy(());
+
+impl Busy {
+    /// `None` while another check (manual or background) is running.
+    pub fn start() -> Option<Busy> {
+        (!BUSY.swap(true, Ordering::SeqCst)).then_some(Busy(()))
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        BUSY.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Check GitHub for a newer release and, if there is one, install it and
 /// restart. Every outcome is reported with a toast.
 pub fn check_and_install(app: &AppHandle) {
-    if BUSY.swap(true, Ordering::SeqCst) {
+    let Some(busy) = Busy::start() else {
         notify::show(app, "Vindictive", "Already checking for updates…");
         return;
-    }
+    };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        let _busy = busy;
         if let Err(e) = run(&app).await {
             log::warn!("update: {e}");
             notify::show(&app, "Update failed", &e);
         }
-        BUSY.store(false, Ordering::SeqCst);
     });
 }
 
@@ -66,4 +83,17 @@ async fn run(app: &AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| format!("install failed: {e}"))?;
     app.restart();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_one_check_at_a_time() {
+        let first = Busy::start().expect("idle at first");
+        assert!(Busy::start().is_none());
+        drop(first);
+        assert!(Busy::start().is_some());
+    }
 }

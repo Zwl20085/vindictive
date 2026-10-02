@@ -1,11 +1,12 @@
-//! Window placement, the capture bar, the global hotkey and autostart.
+//! Window placement, the capture bar, window layers and autostart.
 
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewWindow,
 };
 use tauri_plugin_autostart::ManagerExt as _;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
+use super::hotkeys;
+use super::peek;
 use super::settings::{Dock, Settings};
 
 pub const MAIN: &str = "main";
@@ -154,16 +155,6 @@ pub fn dock_position(
     (x, y)
 }
 
-pub fn register_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
-    let shortcut: Shortcut = hotkey
-        .parse()
-        .map_err(|e| format!("bad hotkey {hotkey:?}: {e}"))?;
-    let gs = app.global_shortcut();
-    gs.unregister_all().map_err(|e| e.to_string())?;
-    gs.register(shortcut)
-        .map_err(|e| format!("could not register {hotkey}: {e}"))
-}
-
 pub fn apply_autostart(app: &AppHandle, enabled: bool) {
     let manager = app.autolaunch();
     let result = if enabled {
@@ -183,7 +174,7 @@ const BOTTOM: LayerStep = ("always on bottom", WebviewWindow::set_always_on_bott
 
 /// Pin the board above or below every other window, or neither. The flag
 /// being switched off is cleared first so the OS never sees both at once.
-fn apply_layer(w: &WebviewWindow, top: bool, bottom: bool) {
+pub fn apply_layer(w: &WebviewWindow, top: bool, bottom: bool) {
     let order = if top {
         [(BOTTOM, false), (TOP, true)]
     } else {
@@ -198,10 +189,8 @@ fn apply_layer(w: &WebviewWindow, top: bool, bottom: bool) {
 
 /// React to a settings change. Errors are logged, never fatal.
 pub fn apply_settings(app: &AppHandle, previous: &Settings, next: &Settings) {
-    if previous.hotkey != next.hotkey {
-        if let Err(e) = register_hotkey(app, &next.hotkey) {
-            log::warn!("{e}");
-        }
+    if previous.hotkey != next.hotkey || previous.board_hotkey != next.board_hotkey {
+        hotkeys::register_all(app, next);
     }
     if previous.autostart != next.autostart {
         apply_autostart(app, next.autostart);
@@ -209,6 +198,7 @@ pub fn apply_settings(app: &AppHandle, previous: &Settings, next: &Settings) {
     if previous.always_on_top != next.always_on_top
         || previous.always_on_bottom != next.always_on_bottom
     {
+        peek::forget();
         if let Ok(w) = window(app, MAIN) {
             apply_layer(&w, next.always_on_top, next.always_on_bottom);
         }
@@ -222,9 +212,7 @@ pub fn apply_settings(app: &AppHandle, previous: &Settings, next: &Settings) {
 
 /// Apply everything at startup.
 pub fn apply_initial(app: &AppHandle, settings: &Settings) {
-    if let Err(e) = register_hotkey(app, &settings.hotkey) {
-        log::warn!("{e}");
-    }
+    hotkeys::register_all(app, settings);
     apply_autostart(app, settings.autostart);
     if let Ok(w) = window(app, MAIN) {
         apply_layer(&w, settings.always_on_top, settings.always_on_bottom);

@@ -21,6 +21,9 @@ export interface DetailActions {
   onReopen: (id: string) => void;
   onSnooze: (id: string, minutes: number) => void;
   onDelete: (id: string) => void;
+  /** Open the in-app edit form. */
+  onEdit: (id: string) => void;
+  /** Open the tip's file in the external editor. */
   onEditLocal: (id: string) => void;
   onSetColor: (id: string, color: string | null) => void;
   onSetSize: (id: string, size: TileSize | null) => void;
@@ -257,7 +260,8 @@ function actionBar(tip: Tip, now: Date, actions: DetailActions, panel: HTMLEleme
     primary,
     tip.status === 'open' ? button(t('snooze1h'), () => actions.onSnooze(tip.id, SNOOZE_HOUR_MINUTES)) : null,
     tip.status === 'open' ? button(t('tomorrow'), () => actions.onSnooze(tip.id, minutesUntilTomorrowMorning(now))) : null,
-    button(t('editLocal'), () => actions.onEditLocal(tip.id)),
+    button(t('edit'), () => actions.onEdit(tip.id)),
+    button(t('openInEditor'), () => actions.onEditLocal(tip.id)),
     button(t('showInFolder'), () => actions.onReveal(tip.id)),
     del,
     button(t('back'), actions.onBack, 'action-back'),

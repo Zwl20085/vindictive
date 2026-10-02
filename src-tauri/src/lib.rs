@@ -10,7 +10,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use app::settings::Settings;
 use app::state::AppState;
 use app::storage::Storage;
-use app::{commands, scheduler, tray, windows};
+use app::{commands, hotkeys, peek, scheduler, tray, update_check, windows};
 use sync::folder;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -44,11 +44,9 @@ pub fn run() {
         ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
-                        if let Err(e) = windows::show_capture(app) {
-                            log::warn!("capture: {e}");
-                        }
+                        hotkeys::on_shortcut(app, shortcut);
                     }
                 })
                 .build(),
@@ -66,14 +64,19 @@ pub fn run() {
             let handle = app.handle().clone();
             tray::build(&handle)?;
             windows::apply_initial(&handle, &settings);
-            scheduler::start(handle);
+            scheduler::start(handle.clone());
+            update_check::start(handle);
             Ok(())
         })
         .on_window_event(|window, event| match (window.label(), event) {
             (windows::MAIN, WindowEvent::CloseRequested { api, .. }) => {
                 // Closing the board hides it; the tray keeps the app alive.
                 api.prevent_close();
+                peek::forget();
                 let _ = window.hide();
+            }
+            (windows::MAIN, WindowEvent::Focused(false)) => {
+                peek::on_blur(window.app_handle());
             }
             (windows::CAPTURE, WindowEvent::Focused(false)) => {
                 let _ = window.hide();
@@ -94,6 +97,7 @@ pub fn run() {
             commands::set_color,
             commands::set_size,
             commands::set_order,
+            commands::update_tip,
             commands::fit_window,
             commands::create_tip,
             commands::save_settings,

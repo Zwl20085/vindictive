@@ -3,6 +3,7 @@
 
 pub mod capture;
 pub mod deadline;
+pub mod edit;
 pub mod frontmatter;
 pub mod nextup;
 pub mod recur;

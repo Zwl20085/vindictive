@@ -72,3 +72,27 @@ describe('tips folder setting', () => {
     await vi.waitFor(() => expect(form.querySelector<HTMLInputElement>('input[name="folder"]')?.value).toBe('D:\\OneDrive\\Tips'));
   });
 });
+
+describe('hotkeys and updates', () => {
+  it('reads the peek hotkey and the update check back', () => {
+    const { form } = render();
+    const peek = form.querySelector<HTMLInputElement>('input[name="board_hotkey"]');
+    const updates = form.querySelector<HTMLInputElement>('input[name="auto_update_check"]');
+    if (!peek || !updates) throw new Error('missing fields');
+    expect(peek.value).toBe('Ctrl+Alt+Shift+Space');
+    expect(updates.checked).toBe(true);
+    peek.value = '  ';
+    updates.checked = false;
+    const read = readSettings(form, SAMPLE_SETTINGS);
+    expect(read.board_hotkey).toBe('');
+    expect(read.auto_update_check).toBe(false);
+  });
+
+  it('rejects the same shortcut for capture and peek', () => {
+    const { form } = render();
+    const peek = form.querySelector<HTMLInputElement>('input[name="board_hotkey"]');
+    if (!peek) throw new Error('missing field');
+    peek.value = 'ctrl+shift+SPACE';
+    expect(() => readSettings(form, SAMPLE_SETTINGS)).toThrow(/different/);
+  });
+});

@@ -45,6 +45,12 @@ function check(name: keyof Settings, value: boolean, label: string): HTMLElement
   return el('label', { className: 'set-check' }, input, label);
 }
 
+/** `Ctrl+Shift+K` and ` ctrl + shift+k ` are the same shortcut. */
+function sameShortcut(a: string, b: string): boolean {
+  const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, '');
+  return norm(a) === norm(b);
+}
+
 /** Read the form back into a new Settings object, validated. */
 export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   const data = new FormData(form);
@@ -58,13 +64,18 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   if (!DOCKS.includes(dock)) throw new Error('invalid dock');
   if (!THEMES.includes(theme)) throw new Error('invalid theme');
   if (!isLanguage(language)) throw new Error('invalid language');
+  const hotkey = str('hotkey') || base.hotkey;
+  const boardHotkey = str('board_hotkey');
+  if (boardHotkey && sameShortcut(boardHotkey, hotkey)) throw new Error(t('hotkeysClash'));
   const alwaysOnTop = bool('always_on_top');
   const alwaysOnBottom = bool('always_on_bottom');
   if (alwaysOnTop && alwaysOnBottom) throw new Error(t('layerConflict'));
   return {
     ...base,
     folder,
-    hotkey: str('hotkey') || base.hotkey,
+    hotkey,
+    board_hotkey: boardHotkey,
+    auto_update_check: bool('auto_update_check'),
     dock,
     theme,
     language: language as Language,
@@ -150,12 +161,14 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
     group(
       t('dock'),
       field(t('hotkey'), 'hotkey', text('hotkey', s.hotkey)),
+      field(t('boardHotkey'), 'board_hotkey', text('board_hotkey', s.board_hotkey, 'text', { placeholder: 'Ctrl+Alt+Shift+Space' })),
       field(t('editorCommand'), 'editor_command', text('editor_command', s.editor_command, 'text', { placeholder: 'code' })),
       field(t('dock'), 'dock', select('dock', s.dock, DOCKS)),
       check('always_on_top', s.always_on_top, t('alwaysOnTop')),
       check('always_on_bottom', s.always_on_bottom, t('alwaysOnBottom')),
       check('autostart', s.autostart, t('autostart')),
       check('notify_new_tips', s.notify_new_tips, t('notifyNew')),
+      check('auto_update_check', s.auto_update_check, t('autoUpdateCheck')),
     ),
     status,
     el(

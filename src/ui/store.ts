@@ -2,7 +2,7 @@
 import type { BoardState, Weather } from '../types';
 import type { WeatherStatus } from './panel';
 
-export type View = { kind: 'board' } | { kind: 'detail'; id: string } | { kind: 'settings' };
+export type View = { kind: 'board' } | { kind: 'detail'; id: string } | { kind: 'edit'; id: string } | { kind: 'settings' };
 export type SyncStatus = 'ok' | 'syncing' | 'error' | 'idle';
 
 export interface UiState {

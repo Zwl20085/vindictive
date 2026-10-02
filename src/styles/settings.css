@@ -50,6 +50,9 @@
 .settings input[type='text'],
 .settings input[type='number'],
 .settings input[type='password'],
+.settings input[type='date'],
+.settings input[type='time'],
+.settings textarea,
 .settings select {
   width: 100%;
   padding: 6px 8px;
@@ -61,6 +64,7 @@
 }
 
 .settings input:focus-visible,
+.settings textarea:focus-visible,
 .settings select:focus-visible {
   outline: none;
   border-bottom-color: var(--accent);
@@ -127,4 +131,31 @@
   color: var(--fg-muted);
   font-size: 12px;
   line-height: 1.4;
+}
+
+/* In-app tip editor: same look as the settings overlay. */
+.settings textarea {
+  min-height: 8em;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings input[type='date'],
+.settings input[type='time'] {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] .settings input[type='date'],
+:root[data-theme='light'] .settings input[type='time'],
+:root[data-theme='paper'] .settings input[type='date'],
+:root[data-theme='paper'] .settings input[type='time'] {
+  color-scheme: light;
+}
+
+.set-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
 }

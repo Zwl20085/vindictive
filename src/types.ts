@@ -70,6 +70,9 @@ export interface Settings {
   folder: string;
   /** Global shortcut for quick capture, e.g. `Ctrl+Shift+Space`. */
   hotkey: string;
+  /** Global shortcut that peeks at the board (lifts it above other windows
+   *  when it lives on the bottom layer); blank turns it off. */
+  board_hotkey: string;
   dock: Dock;
   always_on_top: boolean;
   /** Keep the board beneath every other window; exclusive with always_on_top. */
@@ -92,6 +95,21 @@ export interface Settings {
   fit_height: boolean;
   /** Background opacity of the window in percent (20..100); text stays solid. */
   window_opacity: number;
+  /** Look for a new release in the background (toast only, never installs). */
+  auto_update_check: boolean;
+}
+
+/** The fields of the in-app edit form; see `src-tauri/src/core/edit.rs`. */
+export interface TipEdit {
+  title: string;
+  kind: Kind;
+  priority: Priority;
+  /** `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`; `null` clears it. */
+  due: string | null;
+  location: string | null;
+  tags: string[];
+  /** Markdown body. */
+  body: string;
 }
 
 /** Current conditions, fetched by the backend from Open-Meteo. */
@@ -136,7 +154,10 @@ export interface Commands {
   snooze: (args: { id: string; minutes: number }) => BoardState;
   /** Delete the tip's file (OneDrive keeps it in its recycle bin for a while). */
   delete_tip: (args: { id: string }) => BoardState;
-  /** Open the tip's file in the editor; saving it is the edit. Returns the path. */
+  /** Save the in-app edit form. `base` is the `sha` the form was opened on;
+   *  if the file changed since, the save fails as a conflict. */
+  update_tip: (args: { id: string; base: string | null; edit: TipEdit }) => BoardState;
+  /** Open the tip's file in the external editor. Returns the path. */
   edit_local: (args: { id: string }) => string;
   /** Show the tip's file selected in Explorer. */
   reveal_tip: (args: { id: string }) => void;

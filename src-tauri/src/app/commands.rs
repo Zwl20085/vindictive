@@ -13,8 +13,10 @@ use super::settings::{Dock, Language, Settings};
 use super::state::{now, AppState, BoardState};
 use super::{editor, windows};
 use crate::core::capture;
+use crate::core::edit::{self, TipEdit};
 use crate::core::template;
 use crate::core::tip::{slugify, Kind, Tip};
+use crate::sync::folder::FolderError;
 use crate::sync::meta;
 use crate::sync::weather::{self, Weather};
 
@@ -147,6 +149,34 @@ pub async fn set_order(
     let msg = format!("vindictive: move \"{}\"", tip.front.title);
     state.save_tip(&app, tip.with_front(front), &msg).await?;
     Ok(state.snapshot())
+}
+
+/// Save the in-app edit form. `base` is the file stamp the form was opened
+/// on: if the file changed on disk since, the edit is refused as a conflict
+/// and the user's text stays in the form. The file name never changes.
+#[tauri::command]
+pub async fn update_tip(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    base: Option<String>,
+    edit: TipEdit,
+) -> Result<BoardState, String> {
+    let tip = find(&state, &id)?;
+    check_base(&tip, base.as_deref())?;
+    let edited = edit::apply(&tip, edit)?;
+    let msg = format!("vindictive: edit \"{}\"", edited.front.title);
+    state.save_tip(&app, edited, &msg).await?;
+    Ok(state.snapshot())
+}
+
+/// The form must have been opened on the version of the file the board has now.
+fn check_base(tip: &Tip, base: Option<&str>) -> Result<(), String> {
+    if tip.sha.as_deref() == base {
+        Ok(())
+    } else {
+        Err(FolderError::Conflict(tip.path.clone()).to_string())
+    }
 }
 
 /// Resize the board window to `height` logical pixels, clamped to the
@@ -488,6 +518,23 @@ mod tests {
         assert!(!is_hex_color("4A3B6B"));
         assert!(!is_hex_color("#12345"));
         assert!(!is_hex_color("#GGGGGG"));
+    }
+
+    #[test]
+    fn edits_must_start_from_the_current_file() {
+        let tip = Tip::parse(
+            "tips/a.md",
+            Some("v2".into()),
+            "---
+title: A
+---
+",
+        )
+        .unwrap();
+        assert!(check_base(&tip, Some("v2")).is_ok());
+        let err = check_base(&tip, Some("v1")).unwrap_err();
+        assert!(err.contains("changed on disk"), "{err}");
+        assert!(check_base(&tip, None).is_err());
     }
 
     #[test]

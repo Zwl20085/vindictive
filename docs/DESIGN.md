@@ -114,7 +114,20 @@ The whole board flips to a single detail panel in the tile's colour:
    the lightbox.
 6. Links list.
 7. Actions (flat text buttons): **Done** · **Snooze 1h** · **Tomorrow** ·
-   **Edit** · **Back**.
+   **Edit** · **Open in editor** · **Show in folder** · **Delete** · **Back**.
+
+**Edit** turns the back face into an edit form in the settings overlay's
+visual language: title (required), kind, priority, due date plus an optional
+time (blank clears it; a date without a time stays a bare date in the file),
+location, tags (space or comma separated) and the Markdown body. `Ctrl+Enter`
+saves, `Esc` or **Cancel** returns to the detail view, and validation errors
+show inline. The backend command `update_tip` validates again
+(`core/edit.rs`), keeps every other frontmatter key untouched and never
+renames the file (the id is the file name). The form is mounted once: folder
+rescans and the countdown tick do not re-render it, so nothing typed is lost.
+It remembers the file stamp it was opened on; if the file changed on disk
+meanwhile, Save fails with the usual conflict message and the text stays in
+the form. Saving again after that is a deliberate overwrite.
 
 ### Board chrome
 
@@ -127,14 +140,39 @@ The whole board flips to a single detail panel in the tile's colour:
   `HH:MM` with small seconds, date line (`2026-09-28 MON` / `2026年9月28日
   周一`), and weather on the right: glyph, temperature, place, high/low and
   description. Between them **Clawd**, a 16×11 pixel-art companion drawn as
-  inline SVG, paces back and forth (CSS only: walk, leg shuffle, bob, blink),
-  hops with a heart when clicked, and sleeps with a floating "z" from 23:00 to
-  06:00. All of it stops under `prefers-reduced-motion`.
+  inline SVG rects, reacts to the board with one mood at a time
+  (`lib/mood.ts` decides, `data-mood` on the track picks the pose, CSS in
+  `styles/clawd.css` does the motion). In priority order:
+  - **celebrating** (about 2.5 s after a tip goes from open to done, or a
+    recurring tip rolls forward): arms up, eyes squeezed shut, open grin and
+    blush, bouncing with squash and stretch while confetti and a heart fly.
+    Never on the first board, and not when more than three tips complete in
+    one update (a folder reload or another PC). It briefly wakes him at night.
+  - **sleeping** (23:00 to 06:00): still, eyes closed, a floating "z".
+  - **worried** (an open, un-snoozed tip is overdue): raised brows, lowered
+    eyes, a frown, a sweat drop that slides off, quicker pacing and a short
+    shiver every few seconds; three or more overdue tips make it a little
+    faster.
+  - **relaxed** (no open tip left on the board): sits in the middle, smiles
+    with blushing cheeks, breathes slowly, blinks lazily and hums a "♪" now
+    and then.
+  - **walking** (otherwise): paces back and forth (walk, leg shuffle, bob,
+    blink).
+
+  Clicking him hops with a heart in every mood except mid-celebration. The
+  hover text says what he feels (`Clawd · 2 overdue`, `Clawd · all done`,
+  `Clawd · zzz`, in the UI language). He paces across whatever room the
+  panel leaves him; on a very narrow panel (under about 220 px of content) he
+  steps out, together with the weather glyph and place name, rather than
+  overlap the clock or the weather. All motion stops under
+  `prefers-reduced-motion`; the poses stay. In the browser preview,
+  `?clawd=<mood>` holds a mood for screenshots.
   Weather comes from Open-Meteo through the backend (`fetch_weather`), keyed
   by the `weather_location` setting; blank turns it off. The backend caches
   a result for 20 minutes.
 - Right-click on a tile → Done / Reopen, Snooze 1h, Tomorrow, Colour… (a
-  swatch grid: Auto, the 28 colours, a custom picker), Edit, Show in folder,
+  swatch grid: Auto, the 28 colours, a custom picker), Edit…, Open in editor,
+  Show in folder,
   Delete… (a second menu confirms). The same actions live in the
   detail view; there Delete arms on the first click and fires on the second.
 - The last tile on the board is a quiet "+" tile. It (or `n`, `+`, `Insert`)
@@ -163,17 +201,38 @@ The whole board flips to a single detail panel in the tile's colour:
   window height is set to strip + panel + grid, clamped to the monitor's
   work area, and the board re-docks. Beyond that the board scrolls with a
   4 px scrollbar.
-- **Edit** (detail view and tile menu) opens the tip's `.md` file in your
-  configured editor (`editor_command` setting: `code` by default; blank means
+- **Open in editor** (detail view and tile menu) opens the tip's `.md` file
+  in your configured editor (`editor_command` setting: `code` by default; blank means
   the system default app for `.md`). The file is watched; when you save it,
   the board rescans and updates within a few seconds.
 - **Show in folder** opens the tip's file in Explorer.
 - Settings is an overlay in the same window, in three groups: **Tips folder**
   (path, Browse, Open folder); **appearance** (language, theme, columns,
-  weather city (Nottingham by default), panel, show done); **window** (hotkey,
-  dock, always on top / always on bottom (mutually exclusive; on bottom by
-  default), autostart (on by default), notify on new tips). A settings file
-  asking for both layers is repaired on load: on top wins.
+  weather city (Nottingham by default), panel, show done); **window** (capture
+  hotkey, peek hotkey, editor command, dock, always on top / always on bottom
+  (mutually exclusive; on bottom by default), autostart (on by default),
+  notify on new tips, check for updates in the background (on by default)).
+  A settings file asking for both layers is repaired on load: on top wins.
+  Files from older versions load with the new keys' defaults.
+- **Hotkeys.** Two global shortcuts, registered independently (one that is
+  taken by another app never costs the other) and re-registered when either
+  setting changes; they must differ. `hotkey` (default `Ctrl+Shift+Space`)
+  opens quick capture. `board_hotkey` (default `Ctrl+Alt+Shift+Space`, blank turns
+  it off) **peeks**: a hidden board is shown (and lifted, when it lives on the
+  bottom layer); a visible board on the bottom layer is lifted above every
+  window and focused, and the next press, or the board losing focus, puts it
+  back on the bottom layer (the backend tracks the lift and restores the
+  layer from the settings); a normal or always-on-top board is shown or
+  hidden. A left click on the tray icon peeks the same way. Lifting takes
+  focus first and pins on top last (pinning first does not stick while
+  another window is in front), and dropping with the hotkey hands the
+  keyboard back to the window that was in front before the lift.
+- **Updates.** Tray → **Check for updates…** checks, downloads the signed
+  installer, installs and restarts. With `auto_update_check` on, the backend
+  also checks quietly 45 s after start and then every 24 h; a newer release
+  gets one toast per version per run ("Vindictive X.Y.Z is available ·
+  right-click the tray icon → Check for updates"). It never installs by
+  itself; no update or no network is only a log line.
 
 ### Capture window
 

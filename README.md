@@ -83,14 +83,28 @@ date / weather panel sits on top, and the whole UI is in English or 简体中文
 - **Local Markdown files.** Each tip is a `.md` file with YAML frontmatter in
   your tips folder. Edit it in Obsidian, VS Code, or any editor; the app
   rescans every few seconds and updates the board.
+- **Edit in place.** **Edit** opens a form right on the board: title, kind,
+  priority, due date and time, location, tags and the Markdown notes.
+  `Ctrl+Enter` saves, `Esc` cancels. Everything else in the file (reminders,
+  links, figures, colour, unknown keys) is kept as written. **Open in editor**
+  is still one click away.
 - **Quick capture.** Global hotkey `Ctrl+Shift+Space` opens a one-line bar:
   `Check coil temp after run 3 #lab !high @tomorrow 09:30 ^"Lab 302"`.
+- **Peek.** The board lives under your windows by default; `Ctrl+Alt+Shift+Space`
+  (or a left click on the tray icon) lifts it to the front, and pressing it
+  again or clicking elsewhere drops it back to the desktop.
+- **Clawd.** A small pixel-art companion paces between the clock and the
+  weather and keeps an eye on the board: he cheers when you complete a tip,
+  sweats while something is overdue, sits back contentedly when nothing is
+  left, and sleeps at night.
 - **arXiv and DOI auto-fill.** `arxiv: 2401.12345` or `doi: 10.1109/...` in a
   tip fetches title, authors, year and venue into the file.
 - **Recurring tips.** `repeat: weekly on mon at 10:00`. Pressing Done rolls the
   tip forward instead of closing it.
 - **Tray icon, autostart, dark and light themes.** Only one copy runs: launching
   it again just brings the board to the front.
+- **Update notice.** Once a day the app looks for a new release and says so
+  with a toast. It never installs on its own; that stays one click in the tray.
 - **Private by default.** Tips never leave your PC except via your own OneDrive
   (or any sync tool you choose). No tokens, no GitHub account needed.
 
@@ -108,7 +122,9 @@ The installer is not code-signed yet, so Windows SmartScreen may say
 **Updating.** From 0.3.0 on, right-click the tray icon → **Check for
 updates…**. Vindictive downloads the newest signed installer from Releases,
 installs it and restarts. Copies older than 0.3.0 need one manual install of
-the new `setup.exe`.
+the new `setup.exe`. From 0.4.0 on the app also checks quietly shortly after
+start and then daily, and shows one toast when a new version is out (turn it
+off with **Check for updates in the background** in Settings).
 
 ### 2. Your tips folder (automatic)
 
