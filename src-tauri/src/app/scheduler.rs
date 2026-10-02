@@ -17,9 +17,13 @@ pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         // Give the webview a moment before the first scan.
         tokio::time::sleep(Duration::from_secs(1)).await;
+        tick(&app).await;
+        // Always send the first scan's board: a quiet scan emits nothing, and
+        // the window may have asked for state before the backend was ready.
+        AppState::from_app(&app).emit(&app);
         loop {
-            tick(&app).await;
             tokio::time::sleep(TICK).await;
+            tick(&app).await;
         }
     });
 }

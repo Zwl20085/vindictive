@@ -17,6 +17,10 @@ import { Panel } from './panel';
 import { renderSettings } from './settings';
 import { Store, type UiState } from './store';
 
+/** First-load retries while the backend finishes starting. */
+export const STARTUP_ATTEMPTS = 20;
+export const STARTUP_RETRY_MS = 150;
+
 /** Re-render countdowns this often. */
 export const TICK_MS = 30_000;
 /** Ask the backend for fresh weather this often (it caches on its own too). */
@@ -49,7 +53,7 @@ export class App {
     });
     document.addEventListener('keydown', (e) => this.onKey(e));
     await onBoardUpdated((board) => this.applyBoard(board)).catch((e) => showError('event subscription', e));
-    await this.refresh('get_state');
+    await this.loadInitialState();
     this.openFromHash();
     setInterval(() => this.renderFaces(this.store.get()), TICK_MS);
     setInterval(() => void this.loadWeather(true), WEATHER_MS);
@@ -96,6 +100,28 @@ export class App {
       console.warn('Vindictive: weather unavailable', error);
       void call('frontend_log', { level: 'warn', message: `weather: ${error instanceof Error ? error.message : String(error)}` }).catch(() => undefined);
       this.store.set({ weatherStatus: 'error' });
+    }
+  }
+
+  /**
+   * First load. The window can start before the backend has registered its
+   * state, so early failures are retried quietly; only a lasting failure is
+   * shown. The backend also emits the board after its first folder scan.
+   */
+  private async loadInitialState(): Promise<void> {
+    for (let attempt = 1; attempt <= STARTUP_ATTEMPTS; attempt++) {
+      try {
+        this.applyBoard(await call('get_state'));
+        return;
+      } catch (error) {
+        if (this.store.get().board) return; // the backend's emit got here first
+        if (attempt === STARTUP_ATTEMPTS) {
+          showError('get_state', error);
+          this.store.set({ sync: 'error' });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, STARTUP_RETRY_MS));
+      }
     }
   }
 
