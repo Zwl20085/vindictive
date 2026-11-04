@@ -9,7 +9,10 @@ conventional-commit history; the version a commit shipped in is the first
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-11-04
+## [0.5.1] - 2026-11-04
+
+0.5.0 was tagged but never published: its release build failed on a Tauri
+plugin version mismatch. 0.5.1 is the same code plus that fix.
 
 ### Added
 
@@ -207,8 +210,8 @@ conventional-commit history; the version a commit shipped in is the first
 
 - First release: an always-on-top tile board synced with GitHub.
 
-[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/Zwl20085/vindictive/compare/v0.4.0...v0.5.0
+[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Zwl20085/vindictive/compare/v0.4.0...v0.5.1
 [0.4.0]: https://github.com/Zwl20085/vindictive/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/Zwl20085/vindictive/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Zwl20085/vindictive/compare/v0.3.1...v0.3.2
