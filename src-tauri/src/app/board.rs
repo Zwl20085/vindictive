@@ -71,7 +71,6 @@ impl Board {
         (Board { tips }, new_ids)
     }
 
-    /// Replace one tip by id (or append if missing).
     /// Board without the tip `id`. Unknown ids are a no-op.
     pub fn remove(&self, id: &str) -> Board {
         Board {
@@ -79,6 +78,7 @@ impl Board {
         }
     }
 
+    /// Replace one tip by id (or append if missing).
     pub fn upsert(&self, tip: Tip) -> Board {
         let mut found = false;
         let mut tips: Vec<Tip> = self
@@ -99,17 +99,27 @@ impl Board {
         Board { tips }
     }
 
-    /// A file name that does not collide with an existing tip.
+    /// A file name that does not collide with a tip on the board.
     pub fn unique_file_name(&self, stem: &str) -> String {
-        let ids: std::collections::HashSet<&str> =
-            self.tips.iter().map(|t| t.id.as_str()).collect();
-        if !ids.contains(stem) {
-            return format!("{stem}.md");
-        }
-        (2..)
-            .map(|n| format!("{stem}-{n}"))
-            .find(|c| !ids.contains(c.as_str()))
-            .map(|c| format!("{c}.md"))
+        self.unique_file_name_where(stem, |_| false)
+    }
+
+    /// A file name that collides neither with a tip on the board nor with any
+    /// name for which `taken` is true. The board only holds tips that parsed,
+    /// so the caller passes a check against the folder itself (a broken or
+    /// just-synced file is on disk but not here). Names are compared without
+    /// case, as Windows and OneDrive do: `A.md` and `a.md` are the same file.
+    pub fn unique_file_name_where(&self, stem: &str, taken: impl Fn(&str) -> bool) -> String {
+        let ids: std::collections::HashSet<String> =
+            self.tips.iter().map(|t| t.id.to_lowercase()).collect();
+        let free = |candidate: &str| {
+            let name = format!("{candidate}.md");
+            (!ids.contains(&candidate.to_lowercase()) && !taken(&name)).then_some(name)
+        };
+        free(stem)
+            .into_iter()
+            .chain((2..).filter_map(|n| free(&format!("{stem}-{n}"))))
+            .next()
             .expect("unbounded iterator")
     }
 }
@@ -188,5 +198,20 @@ mod tests {
         assert_eq!(next.unique_file_name("q"), "q.md");
         let more = next.upsert(tip("tips/a-2.md", "4"));
         assert_eq!(more.unique_file_name("a"), "a-3.md");
+    }
+
+    #[test]
+    fn unique_names_avoid_files_not_on_the_board() {
+        let board = Board::new(vec![tip("Report.md", "1")]);
+        assert_eq!(
+            board.unique_file_name("report"),
+            "report-2.md",
+            "ids compare without case"
+        );
+        // `report-2.md` exists on disk but failed to parse, so it is not a tip.
+        let on_disk = ["report-2.md", "REPORT-3.md"];
+        let taken = |name: &str| on_disk.iter().any(|f| f.eq_ignore_ascii_case(name));
+        assert_eq!(board.unique_file_name_where("report", taken), "report-4.md");
+        assert_eq!(board.unique_file_name_where("fresh", taken), "fresh.md");
     }
 }

@@ -6,9 +6,9 @@ use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
 use super::frontmatter::{join, split, FrontmatterError};
-use super::timeparse::{format_dt, parse_due, parse_remind};
+use super::timeparse::{format_dt, is_offset, parse_due, parse_remind};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     #[default]
@@ -19,7 +19,7 @@ pub enum Kind {
     Event,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Priority {
     Low,
@@ -28,12 +28,127 @@ pub enum Priority {
     High,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     #[default]
     Open,
     Done,
+}
+
+// The enums are written lowercase but read case-insensitively (`kind: Task`),
+// and an empty value (`kind:`) means the default.
+lenient::enum_deserialize!(Kind {
+    "task" => Task,
+    "deadline" => Deadline,
+    "note" => Note,
+    "reading" => Reading,
+    "event" => Event,
+});
+lenient::enum_deserialize!(Priority {
+    "low" => Low,
+    "normal" => Normal,
+    "high" => High,
+});
+lenient::enum_deserialize!(Status {
+    "open" => Open,
+    "done" => Done,
+});
+
+/// Forgiving readers for hand-written YAML: a number or boolean where text is
+/// expected is taken as its text (`title: 2024`), and a single value where a
+/// list is expected is a one-item list (`remind: 2026-10-14`). Serialisation
+/// is untouched, so files are still written in the canonical form.
+mod lenient {
+    use serde::de::{Deserialize, Deserializer, Error};
+    use serde_yaml::Value;
+
+    /// Text of a scalar; `None` for null; an error for a list or mapping.
+    pub fn scalar_text<E: Error>(value: Value) -> Result<Option<String>, E> {
+        match value {
+            Value::Null => Ok(None),
+            Value::Bool(b) => Ok(Some(b.to_string())),
+            Value::Number(n) => Ok(Some(n.to_string())),
+            Value::String(s) => Ok(Some(s)),
+            Value::Tagged(t) => scalar_text(t.value),
+            Value::Sequence(_) => Err(E::custom("expected a single value, found a list")),
+            Value::Mapping(_) => Err(E::custom("expected a single value, found a mapping")),
+        }
+    }
+
+    pub fn string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+        Ok(scalar_text(Value::deserialize(d)?)?.unwrap_or_default())
+    }
+
+    pub fn opt_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+        scalar_text(Value::deserialize(d)?)
+    }
+
+    /// `arxiv: 2401.10000` unquoted is a YAML float, and a float has lost the
+    /// trailing zeros. Rebuild the id from the number; text is kept as is.
+    pub fn arxiv<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Number(n) => Ok(Some(arxiv_from_number(&n.to_string()))),
+            other => scalar_text(other),
+        }
+    }
+
+    /// `2401.1` → `2401.10000`, `704.0001` → `0704.0001`: the YYMM part has
+    /// four digits, the sequence four before 2015-01 and five from then on.
+    /// Anything that does not fit that shape is returned unchanged.
+    pub fn arxiv_from_number(text: &str) -> String {
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        let Some((yymm, seq)) = text.split_once('.') else {
+            return text.to_string();
+        };
+        if !digits(yymm) || !digits(seq) || yymm.len() > 4 {
+            return text.to_string();
+        }
+        let yymm = format!("{yymm:0>4}");
+        let width = if yymm.as_str() < "1501" { 4 } else { 5 };
+        if seq.len() > width {
+            return text.to_string();
+        }
+        format!("{yymm}.{seq:0<width$}")
+    }
+
+    pub fn string_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+        list_text(Value::deserialize(d)?)
+    }
+
+    fn list_text<E: Error>(value: Value) -> Result<Vec<String>, E> {
+        match value {
+            Value::Sequence(items) => Ok(items
+                .into_iter()
+                .map(scalar_text)
+                .collect::<Result<Vec<_>, E>>()?
+                .into_iter()
+                .flatten()
+                .collect()),
+            Value::Tagged(t) => list_text(t.value),
+            other => Ok(scalar_text(other)?.into_iter().collect()),
+        }
+    }
+
+    macro_rules! enum_deserialize {
+        ($ty:ident { $($name:literal => $variant:ident),+ $(,)? }) => {
+            impl<'de> Deserialize<'de> for $ty {
+                fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                    use serde::de::Error;
+                    let value = serde_yaml::Value::deserialize(d)?;
+                    let Some(text) = lenient::scalar_text::<D::Error>(value)? else {
+                        return Ok($ty::default());
+                    };
+                    match text.trim().to_lowercase().as_str() {
+                        "" => Ok($ty::default()),
+                        $($name => Ok($ty::$variant),)+
+                        _ => Err(D::Error::unknown_variant(&text, &[$($name),+])),
+                    }
+                }
+            }
+        };
+    }
+    pub(super) use enum_deserialize;
 }
 
 /// Bibliographic metadata fetched from arXiv or Crossref.
@@ -54,7 +169,7 @@ pub struct Paper {
 /// here so that a hand-written `2026-10-15` survives a round trip untouched.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct FrontMatter {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient::string")]
     pub title: String,
     #[serde(default)]
     pub kind: Kind,
@@ -62,39 +177,95 @@ pub struct FrontMatter {
     pub priority: Priority,
     #[serde(default)]
     pub status: Status,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub due: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub remind: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub location: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub links: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub images: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub tags: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub repeat: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub color: Option<String>,
     /// Tile size override: `sm`, `md` or `wide`. Absent means automatic.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub size: Option<String>,
     /// Manual board position (set by drag and drop); absent means by score.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub order: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::arxiv",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub arxiv: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub doi: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paper: Option<Paper>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub snoozed_until: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub done_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub created: Option<String>,
     /// Any keys we do not understand are preserved verbatim.
     #[serde(flatten)]
@@ -102,15 +273,16 @@ pub struct FrontMatter {
 }
 
 /// A tip as the UI sees it: frontmatter plus resolved timestamps plus where it
-/// lives in the repository.
+/// lives in the tips folder.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(into = "TipJson", from = "TipJson")]
 pub struct Tip {
     /// Stable identifier: the file name without `.md`.
     pub id: String,
-    /// Path inside the repository, e.g. `tips/2026-10-01-camera-ready.md`.
+    /// Path relative to the tips folder, e.g. `2026-10-01-camera-ready.md`.
     pub path: String,
-    /// Git blob SHA of the file as last fetched. Needed to update it.
+    /// Change stamp of the file as last read (see `sync::folder`). A write
+    /// passes it back so that a file changed on disk is a conflict, not lost.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
     #[serde(flatten)]
@@ -124,10 +296,14 @@ pub struct Tip {
     pub remind_at: Vec<NaiveDateTime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snoozed_until_at: Option<NaiveDateTime>,
+    /// Problems found while resolving the frontmatter, e.g. a `due` that does
+    /// not parse. Derived, never written to the file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Top-level JSON keys of a `Tip` besides the frontmatter ones.
-const TIP_KEYS: [&str; 8] = [
+const TIP_KEYS: [&str; 9] = [
     "id",
     "path",
     "sha",
@@ -135,6 +311,7 @@ const TIP_KEYS: [&str; 8] = [
     "due_at",
     "remind_at",
     "snoozed_until_at",
+    "warnings",
     "shadowed",
 ];
 
@@ -159,6 +336,8 @@ struct TipJson {
     remind_at: Vec<NaiveDateTime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     snoozed_until_at: Option<NaiveDateTime>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 impl From<Tip> for TipJson {
@@ -178,6 +357,7 @@ impl From<Tip> for TipJson {
             due_at: tip.due_at,
             remind_at: tip.remind_at,
             snoozed_until_at: tip.snoozed_until_at,
+            warnings: tip.warnings,
         }
     }
 }
@@ -195,6 +375,7 @@ impl From<TipJson> for Tip {
             due_at: json.due_at,
             remind_at: json.remind_at,
             snoozed_until_at: json.snoozed_until_at,
+            warnings: json.warnings,
         }
     }
 }
@@ -217,20 +398,48 @@ impl Tip {
         if front.title.trim().is_empty() {
             return Err(TipError::MissingTitle);
         }
-        Ok(Tip::from_parts(path, sha, front, body.to_string()))
+        // Only the source text shows whether `arxiv` was written unquoted.
+        let arxiv_is_number = front.arxiv.is_some()
+            && serde_yaml::from_str::<serde_yaml::Value>(yaml)
+                .is_ok_and(|v| v.get("arxiv").is_some_and(serde_yaml::Value::is_number));
+        let mut tip = Tip::from_parts(path, sha, front, body.to_string());
+        if arxiv_is_number {
+            tip.warnings
+                .push("arxiv: unquoted id read as a number; quote it in the file".into());
+        }
+        Ok(tip)
     }
 
     pub fn from_parts(path: &str, sha: Option<String>, front: FrontMatter, body: String) -> Tip {
         let id = id_from_path(path);
-        let due_at = front.due.as_deref().and_then(parse_due);
-        let mut remind_at: Vec<NaiveDateTime> = front
-            .remind
-            .iter()
-            .filter_map(|s| parse_remind(s, due_at))
-            .collect();
+        let mut warnings = Vec::new();
+        let mut resolve = |key: &str, raw: Option<&str>| {
+            let parsed = raw.and_then(parse_due);
+            if let (Some(raw), None) = (raw, parsed) {
+                warnings.push(format!("{key}: cannot parse {raw:?}"));
+            }
+            parsed
+        };
+        let due_at = resolve("due", front.due.as_deref());
+        let snoozed_until_at = resolve("snoozed_until", front.snoozed_until.as_deref());
+        let mut remind_at = Vec::new();
+        for raw in &front.remind {
+            match parse_remind(raw, due_at) {
+                Some(at) => remind_at.push(at),
+                None if is_offset(raw) && due_at.is_none() => {
+                    warnings.push(format!("remind: {raw:?} needs a due date"))
+                }
+                None if is_offset(raw) => warnings.push(format!("remind: {raw:?} is out of range")),
+                None => warnings.push(format!("remind: cannot parse {raw:?}")),
+            }
+        }
         remind_at.sort();
         remind_at.dedup();
-        let snoozed_until_at = front.snoozed_until.as_deref().and_then(parse_due);
+        if let Some(rule) = front.repeat.as_deref() {
+            if super::recur::parse(rule).is_none() {
+                warnings.push(format!("repeat: cannot parse {rule:?}"));
+            }
+        }
         Tip {
             id,
             path: path.to_string(),
@@ -240,6 +449,7 @@ impl Tip {
             due_at,
             remind_at,
             snoozed_until_at,
+            warnings,
         }
     }
 
@@ -289,7 +499,8 @@ impl Tip {
                 front.remind = self
                     .remind_at
                     .iter()
-                    .filter_map(|r| shift.map(|s| format_dt(*r + s)))
+                    .filter_map(|r| r.checked_add_signed(shift?))
+                    .map(format_dt)
                     .collect();
             }
             None => front.status = Status::Done,
@@ -322,21 +533,26 @@ pub fn id_from_path(path: &str) -> String {
     name.strip_suffix(".md").unwrap_or(name).to_string()
 }
 
+const MAX_SLUG_BYTES: usize = 48;
+
 /// Turn a title into a safe, short file stem.
 pub fn slugify(title: &str) -> String {
     let mut out = String::new();
     let mut last_dash = true;
     for c in title.chars().flat_map(|c| c.to_lowercase()) {
-        if c.is_ascii_alphanumeric() {
-            out.push(c);
-            last_dash = false;
+        // Letters and digits in any script, so `读论文` gives a real slug.
+        let next = if c.is_alphanumeric() {
+            c
         } else if !last_dash {
-            out.push('-');
-            last_dash = true;
-        }
-        if out.len() >= 48 {
+            '-'
+        } else {
+            continue;
+        };
+        if out.len() + next.len_utf8() > MAX_SLUG_BYTES {
             break;
         }
+        out.push(next);
+        last_dash = next == '-';
     }
     let trimmed = out.trim_matches('-');
     if trimmed.is_empty() {
@@ -449,6 +665,75 @@ body
     }
 
     #[test]
+    fn unquoted_arxiv_ids_are_rebuilt_and_flagged() {
+        let parse = |v: &str| {
+            Tip::parse("p.md", None, &format!("---\ntitle: t\narxiv: {v}\n---\n")).unwrap()
+        };
+        let warning = "arxiv: unquoted id read as a number; quote it in the file";
+        let tip = parse("2401.10000");
+        assert_eq!(
+            tip.front.arxiv.as_deref(),
+            Some("2401.10000"),
+            "5-digit era"
+        );
+        assert_eq!(tip.warnings, vec![warning]);
+        let tip = parse("0704.0001");
+        assert_eq!(tip.front.arxiv.as_deref(), Some("0704.0001"), "4-digit era");
+        assert_eq!(tip.warnings, vec![warning]);
+        assert_eq!(parse("1412.1230").front.arxiv.as_deref(), Some("1412.1230"));
+        assert_eq!(
+            parse("1501.12300").front.arxiv.as_deref(),
+            Some("1501.12300")
+        );
+        // Quoted: kept exactly, no warning.
+        let tip = parse("'2401.10000'");
+        assert_eq!(tip.front.arxiv.as_deref(), Some("2401.10000"));
+        assert!(tip.warnings.is_empty());
+        let tip = parse("arXiv:2401.10000v2");
+        assert_eq!(tip.front.arxiv.as_deref(), Some("arXiv:2401.10000v2"));
+        assert!(tip.warnings.is_empty());
+        // Numbers that are not an id shape come back as plain text.
+        assert_eq!(lenient::arxiv_from_number("2401.1"), "2401.10000");
+        assert_eq!(lenient::arxiv_from_number("704.0001"), "0704.0001");
+        assert_eq!(lenient::arxiv_from_number("-2401.1"), "-2401.1");
+        assert_eq!(lenient::arxiv_from_number("2401.123456"), "2401.123456");
+        assert_eq!(lenient::arxiv_from_number("1412.12345"), "1412.12345");
+        assert_eq!(lenient::arxiv_from_number("12345.1"), "12345.1");
+        assert_eq!(lenient::arxiv_from_number("2401"), "2401");
+        assert_eq!(lenient::arxiv_from_number("1e20"), "1e20");
+        // Once the app writes the file back, the id is quoted and stays put.
+        let md = parse("2401.10000").to_markdown().unwrap();
+        let again = Tip::parse("p.md", None, &md).unwrap();
+        assert_eq!(again.front.arxiv.as_deref(), Some("2401.10000"));
+        assert!(again.warnings.is_empty(), "{md}");
+    }
+
+    #[test]
+    fn bad_repeat_is_a_warning() {
+        let text = "---\ntitle: t\ndue: 2026-10-05 10:00\nrepeat: fortnightly\n---\n";
+        let tip = Tip::parse("r.md", None, text).unwrap();
+        assert_eq!(tip.warnings, vec![r#"repeat: cannot parse "fortnightly""#]);
+        let ok = "---\ntitle: t\nrepeat: weekly on mon\n---\n";
+        assert!(Tip::parse("r.md", None, ok).unwrap().warnings.is_empty());
+    }
+
+    #[test]
+    fn complete_drops_reminders_that_overflow() {
+        // A reminder far before due is fine on its own, but shifting it by
+        // the roll-forward step must not panic; in range ones still move.
+        let mut tip = Tip::parse(
+            "gm.md",
+            None,
+            "---\ntitle: t\ndue: 2026-10-05 10:00\nremind: [2026-10-05 09:30]\nrepeat: daily at 10:00\n---\n",
+        )
+        .unwrap();
+        tip.remind_at.push(NaiveDateTime::MAX);
+        let done = tip.complete(dt("2026-10-05 11:00"));
+        assert_eq!(done.due_at, Some(dt("2026-10-06 10:00")));
+        assert_eq!(done.front.remind, vec!["2026-10-06 09:30"]);
+    }
+
+    #[test]
     fn display_title_prefers_paper_title_for_reading() {
         let text = "---\ntitle: read this\nkind: reading\narxiv: 2401.00001\npaper:\n  title: A Great Paper\n  authors: [A, B]\n---\n";
         let tip = Tip::parse("p.md", None, text).unwrap();
@@ -462,7 +747,88 @@ body
             "submit-ecce-camera-ready"
         );
         assert_eq!(slugify("   "), "tip");
-        assert_eq!(slugify("读论文 arXiv 2401"), "arxiv-2401");
         assert!(slugify(&"x".repeat(200)).len() <= 48);
+    }
+
+    #[test]
+    fn slugify_keeps_unicode_letters() {
+        assert_eq!(slugify("读论文 arXiv 2401"), "读论文-arxiv-2401");
+        assert_eq!(slugify("Über  Größe!!"), "über-größe");
+        assert_eq!(slugify("提交——终稿。"), "提交-终稿");
+        let long = slugify(&"读".repeat(100));
+        assert!(long.len() <= 48, "{}", long.len());
+        assert_eq!(long, "读".repeat(16), "cut on a character boundary");
+    }
+
+    #[test]
+    fn lenient_frontmatter_values() {
+        let text = "---\ntitle: 2024\nkind: Task\npriority: HIGH\nstatus: Done\ndue: 2026-10-15\nremind: 2026-10-14\ntags: [2024, lab, true]\nlinks: https://example.org\nlocation: 302\nrepeat:\n---\nbody\n";
+        let tip = Tip::parse("x.md", None, text).unwrap();
+        assert_eq!(tip.front.title, "2024");
+        assert_eq!(tip.front.kind, Kind::Task);
+        assert_eq!(tip.front.priority, Priority::High);
+        assert_eq!(tip.front.status, Status::Done);
+        assert_eq!(tip.front.remind, vec!["2026-10-14"]);
+        assert_eq!(tip.remind_at, vec![dt("2026-10-14 09:00")]);
+        assert_eq!(tip.front.tags, vec!["2024", "lab", "true"]);
+        assert_eq!(tip.front.links, vec!["https://example.org"]);
+        assert_eq!(tip.front.location.as_deref(), Some("302"));
+        assert_eq!(tip.front.repeat, None);
+        let kinds = ["kind: Deadline", "kind: NOTE", "kind: ' reading '", "kind:"];
+        let want = [Kind::Deadline, Kind::Note, Kind::Reading, Kind::Task];
+        for (k, w) in kinds.iter().zip(want) {
+            let t = Tip::parse("x.md", None, &format!("---\ntitle: t\n{k}\n---\n")).unwrap();
+            assert_eq!(t.front.kind, w, "{k}");
+        }
+        assert!(Tip::parse("x.md", None, "---\ntitle: t\nkind: chore\n---\n").is_err());
+        assert!(Tip::parse("x.md", None, "---\ntitle: [a, b]\n---\n").is_err());
+        // Written back in canonical form: lowercase enums, lists as lists.
+        let md = tip.to_markdown().unwrap();
+        assert!(md.contains("kind: task"), "{md}");
+        assert!(md.contains("priority: high"), "{md}");
+        assert!(md.contains("status: done"), "{md}");
+        assert!(md.contains("remind:\n- 2026-10-14"), "{md}");
+        assert!(md.contains("title: '2024'"), "{md}");
+        let again = Tip::parse("x.md", None, &md).unwrap();
+        assert_eq!(again.front, tip.front);
+        // The JSON shape for the UI is unchanged too.
+        let json = serde_json::to_value(&tip).unwrap();
+        assert_eq!(json["kind"], "task");
+        assert_eq!(json["priority"], "high");
+        let back: Tip = serde_json::from_value(json).unwrap();
+        assert_eq!(back, tip);
+    }
+
+    #[test]
+    fn unparsable_dates_become_warnings() {
+        let text = "---\ntitle: t\ndue: 15/10/2026\nremind: [-1d, someday, 2026-10-14 09:00]\nsnoozed_until: later\n---\n";
+        let tip = Tip::parse("x.md", None, text).unwrap();
+        assert_eq!(tip.due_at, None);
+        assert_eq!(tip.remind_at, vec![dt("2026-10-14 09:00")]);
+        assert_eq!(
+            tip.warnings,
+            vec![
+                r#"due: cannot parse "15/10/2026""#,
+                r#"snoozed_until: cannot parse "later""#,
+                r#"remind: "-1d" needs a due date"#,
+                r#"remind: cannot parse "someday""#,
+            ]
+        );
+        let huge = "---\ntitle: t\ndue: 2026-10-15\nremind: -99999999999d\n---\n";
+        let tip = Tip::parse("x.md", None, huge).unwrap();
+        assert_eq!(
+            tip.warnings,
+            vec![r#"remind: "-99999999999d" is out of range"#]
+        );
+        // Derived: not in the file, but carried to the UI and the cache.
+        let md = tip.to_markdown().unwrap();
+        assert!(!md.contains("warnings"), "{md}");
+        let json = serde_json::to_string(&tip).unwrap();
+        assert!(json.contains("\"warnings\""), "{json}");
+        assert_eq!(serde_json::from_str::<Tip>(&json).unwrap(), tip);
+        // A clean tip has none and no `warnings` key in its JSON.
+        let clean = Tip::parse("x.md", None, SAMPLE).unwrap();
+        assert!(clean.warnings.is_empty());
+        assert!(!serde_json::to_string(&clean).unwrap().contains("warnings"));
     }
 }

@@ -9,8 +9,10 @@
 //! yearly on 03-15 [at HH:MM]
 //! ```
 //! Default time is 09:00. Day names accept 3-letter or full English names.
+//! A day past the end of a month falls on its last day: `monthly on 31`
+//! fires on Apr 30 and Feb 28/29, `yearly on 02-29` on Feb 28 in common years.
 
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rule {
@@ -97,7 +99,7 @@ pub fn next_occurrence(rule: &str, after: NaiveDateTime) -> Option<NaiveDateTime
                 return Some(candidate);
             }
         }
-        date += Duration::days(1);
+        date = date.succ_opt()?;
     }
     None
 }
@@ -107,10 +109,26 @@ fn occurrence_on(rule: &Rule, date: NaiveDate) -> Option<NaiveDateTime> {
         Rule::Daily { at } => (true, *at),
         Rule::Weekdays { at } => (date.weekday().number_from_monday() <= 5, *at),
         Rule::Weekly { days, at } => (days.contains(&date.weekday()), *at),
-        Rule::Monthly { day, at } => (date.day() == *day, *at),
-        Rule::Yearly { month, day, at } => (date.month() == *month && date.day() == *day, *at),
+        Rule::Monthly { day, at } => (date.day() == clamp_day(date, *day), *at),
+        Rule::Yearly { month, day, at } => (
+            date.month() == *month && date.day() == clamp_day(date, *day),
+            *at,
+        ),
     };
     matches.then(|| date.and_time(at))
+}
+
+/// `day`, or the last day of `date`'s month if that month is shorter.
+fn clamp_day(date: NaiveDate, day: u32) -> u32 {
+    day.min(days_in_month(date))
+}
+
+fn days_in_month(date: NaiveDate) -> u32 {
+    // Day 28 exists in every month; step from there to the month's last day.
+    (28..=31)
+        .rev()
+        .find(|&d| date.with_day(d).is_some())
+        .unwrap_or(28)
 }
 
 #[cfg(test)]
@@ -191,13 +209,45 @@ mod tests {
             Some(dt("2026-10-08 10:00"))
         );
         assert_eq!(
+            next_occurrence("monthly on 31", dt("2026-03-10 00:00")),
+            Some(dt("2026-03-31 09:00"))
+        );
+        assert_eq!(
+            next_occurrence("yearly on 02-29 at 12:00", dt("2027-03-01 00:00")),
+            Some(dt("2028-02-29 12:00"))
+        );
+    }
+
+    #[test]
+    fn short_months_clamp_to_last_day() {
+        assert_eq!(
             next_occurrence("monthly on 31", dt("2026-02-10 00:00")),
-            Some(dt("2026-03-31 09:00")),
-            "months without a 31st are skipped"
+            Some(dt("2026-02-28 09:00")),
+            "no Feb 31st: fires on the last day of February"
+        );
+        assert_eq!(
+            next_occurrence("monthly on 31", dt("2028-02-10 00:00")),
+            Some(dt("2028-02-29 09:00")),
+            "leap year"
+        );
+        assert_eq!(
+            next_occurrence("monthly on 31", dt("2026-04-01 00:00")),
+            Some(dt("2026-04-30 09:00"))
+        );
+        assert_eq!(
+            next_occurrence("monthly on 30", dt("2026-02-28 09:00")),
+            Some(dt("2026-03-30 09:00")),
+            "after the clamped Feb 28 run, March uses the real 30th"
         );
         assert_eq!(
             next_occurrence("yearly on 02-29 at 12:00", dt("2026-01-01 00:00")),
-            Some(dt("2028-02-29 12:00"))
+            Some(dt("2026-02-28 12:00")),
+            "common year: Feb 28"
+        );
+        assert_eq!(
+            next_occurrence("yearly on 02-29 at 12:00", dt("2028-02-28 13:00")),
+            Some(dt("2028-02-29 12:00")),
+            "leap year: the real Feb 29, not the 28th"
         );
     }
 

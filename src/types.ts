@@ -63,6 +63,8 @@ export interface Tip {
   due_at?: string;
   remind_at: string[];
   snoozed_until_at?: string;
+  /** Problems found reading the frontmatter, e.g. a `due` that does not parse. */
+  warnings?: string[];
 }
 
 export interface Settings {

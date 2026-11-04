@@ -2,7 +2,7 @@
 //!
 //! All times are local naive times: what the wall clock in the lab shows.
 
-use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta};
 
 const DATETIME_FORMATS: &[&str] = &[
     "%Y-%m-%d %H:%M",
@@ -23,10 +23,11 @@ pub fn parse_due(s: &str) -> Option<NaiveDateTime> {
 
 /// Parse a `remind` value. Accepts absolute datetimes, dates (09:00 assumed),
 /// or offsets relative to `due` such as `-1d`, `-2h`, `-30m`, `-1w`.
+/// An offset that would leave chrono's date range gives `None`.
 pub fn parse_remind(s: &str, due: Option<NaiveDateTime>) -> Option<NaiveDateTime> {
     let s = s.trim();
-    if let Some(offset) = parse_offset(s) {
-        return due.map(|d| d + offset);
+    if is_offset(s) {
+        return parse_offset(s).and_then(|offset| due?.checked_add_signed(offset));
     }
     parse_datetime(s, MORNING)
 }
@@ -35,7 +36,8 @@ pub fn parse_remind(s: &str, due: Option<NaiveDateTime>) -> Option<NaiveDateTime
 pub fn parse_datetime(s: &str, default_time: (u32, u32)) -> Option<NaiveDateTime> {
     let s = s.trim().trim_matches('"').trim_matches('\'');
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return Some(dt.naive_local());
+        // An explicit offset names an instant; show it on the local clock.
+        return Some(dt.with_timezone(&chrono::Local).naive_local());
     }
     for f in DATETIME_FORMATS {
         if let Ok(dt) = NaiveDateTime::parse_from_str(s, f) {
@@ -51,24 +53,36 @@ pub fn parse_datetime(s: &str, default_time: (u32, u32)) -> Option<NaiveDateTime
     None
 }
 
-/// `-1d`, `-2h`, `-30m`, `-1w`, `+1h` → signed duration.
+/// True if `s` is shaped like a relative offset (`-1d`, `+2h`), valid or not.
+/// Such a value is never an absolute date, even when it is out of range.
+pub fn is_offset(s: &str) -> bool {
+    let s = s.trim();
+    let mut chars = s.chars();
+    matches!(chars.next(), Some('-' | '+'))
+        && matches!(s.chars().last(), Some('m' | 'h' | 'd' | 'w'))
+        && s.len() > 2
+        && s[1..s.len() - 1].trim().chars().all(|c| c.is_ascii_digit())
+}
+
+/// `-1d`, `-2h`, `-30m`, `-1w`, `+1h` → signed duration. `None` if the
+/// value is malformed or too large for a duration (never panics).
 pub fn parse_offset(s: &str) -> Option<Duration> {
     let s = s.trim();
-    let (sign, rest) = match s.chars().next()? {
-        '-' => (-1, &s[1..]),
-        '+' => (1, &s[1..]),
+    let (negative, rest) = match s.chars().next()? {
+        '-' => (true, &s[1..]),
+        '+' => (false, &s[1..]),
         _ => return None,
     };
     let unit = rest.chars().last()?;
     let n: i64 = rest[..rest.len() - unit.len_utf8()].trim().parse().ok()?;
-    let d = match unit {
-        'm' => Duration::minutes(n),
-        'h' => Duration::hours(n),
-        'd' => Duration::days(n),
-        'w' => Duration::weeks(n),
-        _ => return None,
-    };
-    Some(d * sign)
+    let n = if negative { n.checked_neg()? } else { n };
+    match unit {
+        'm' => TimeDelta::try_minutes(n),
+        'h' => TimeDelta::try_hours(n),
+        'd' => TimeDelta::try_days(n),
+        'w' => TimeDelta::try_weeks(n),
+        _ => None,
+    }
 }
 
 /// Canonical form written back into frontmatter.
@@ -90,10 +104,13 @@ mod tests {
         assert_eq!(parse_due("2026-10-15 08:30"), Some(dt("2026-10-15 08:30")));
         assert_eq!(parse_due("2026-10-15T08:30"), Some(dt("2026-10-15 08:30")));
         assert_eq!(parse_due("2026/10/15"), Some(dt("2026-10-15 23:59")));
-        assert_eq!(
-            parse_due("2026-10-15T08:30:00+02:00"),
-            Some(dt("2026-10-15 08:30"))
-        );
+        // An explicit offset is converted to the local clock, whatever the
+        // machine's zone is: the same instant in two spellings agrees.
+        let utc = chrono::DateTime::parse_from_rfc3339("2026-10-15T06:30:00Z").unwrap();
+        let local = utc.with_timezone(&chrono::Local).naive_local();
+        assert_eq!(parse_due("2026-10-15T08:30:00+02:00"), Some(local));
+        assert_eq!(parse_due("2026-10-15T06:30:00Z"), Some(local));
+        assert_eq!(parse_due("2026-10-15T01:30:00-05:00"), Some(local));
         assert_eq!(parse_due("soon"), None);
     }
 
@@ -117,6 +134,33 @@ mod tests {
         assert_eq!(parse_offset("-x"), None);
         assert_eq!(parse_offset("1d"), None);
         assert_eq!(parse_offset("-3y"), None);
+        assert_eq!(parse_offset("-2d"), Some(Duration::days(-2)));
+    }
+
+    #[test]
+    fn huge_offsets_do_not_panic() {
+        let due = Some(dt("2026-10-15 23:59"));
+        // Too big for a duration at all (each panicked in `Duration::*`).
+        for s in [
+            "+99999999999w",
+            "-9223372036854775807m",
+            "-9223372036854775808h",
+            "+9223372036854775807d",
+        ] {
+            assert_eq!(parse_offset(s), None, "{s}");
+        }
+        // Every one of these is out of range once added to a date: never a
+        // panic, and never misread as an absolute date.
+        for s in [
+            "-99999999999d",
+            "+99999999999w",
+            "-9223372036854775807m",
+            "-9223372036854775808h",
+            "+9223372036854775807d",
+            "+99999999d",
+        ] {
+            assert_eq!(parse_remind(s, due), None, "{s}");
+        }
     }
 
     #[test]

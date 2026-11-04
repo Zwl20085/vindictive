@@ -52,8 +52,7 @@ pub fn parse(input: &str, now: NaiveDateTime) -> Option<FrontMatter> {
                 Some(dt) => pending_date = Some(dt),
                 None => title_words.push(tok),
             }
-        } else if pending_date.is_some() && looks_like_time(&tok) {
-            let t = NaiveTime::parse_from_str(&tok, "%H:%M").ok()?;
+        } else if let Some(t) = pending_date.is_some().then(|| parse_time(&tok)).flatten() {
             pending_date = pending_date.map(|d| d.date().and_time(t));
         } else if let Some(id) = arxiv_id(&tok) {
             front.arxiv = Some(id);
@@ -120,14 +119,28 @@ fn parse_date_word(d: &str, now: NaiveDateTime) -> Option<NaiveDateTime> {
     let base_time = NaiveTime::from_hms_opt(DEFAULT_CAPTURE_TIME.0, DEFAULT_CAPTURE_TIME.1, 0)?;
     match d.to_ascii_lowercase().as_str() {
         "today" | "tod" => Some(now.date().and_time(base_time)),
-        "tomorrow" | "tom" | "tmr" => Some((now + Duration::days(1)).date().and_time(base_time)),
-        "nextweek" => Some((now + Duration::weeks(1)).date().and_time(base_time)),
+        "tomorrow" | "tom" | "tmr" => Some(
+            now.checked_add_signed(Duration::days(1))?
+                .date()
+                .and_time(base_time),
+        ),
+        "nextweek" => Some(
+            now.checked_add_signed(Duration::weeks(1))?
+                .date()
+                .and_time(base_time),
+        ),
         other => parse_datetime(other, DEFAULT_CAPTURE_TIME),
     }
 }
 
-fn looks_like_time(tok: &str) -> bool {
-    tok.len() == 5 && tok.as_bytes()[2] == b':' && tok[..2].parse::<u8>().is_ok()
+/// `HH:MM` as a valid clock time. Anything else, `25:99` included, is not a
+/// time and stays in the title rather than failing the whole capture.
+fn parse_time(tok: &str) -> Option<NaiveTime> {
+    let looks_like_time =
+        tok.len() == 5 && tok.as_bytes()[2] == b':' && tok[..2].parse::<u8>().is_ok();
+    looks_like_time
+        .then(|| NaiveTime::parse_from_str(tok, "%H:%M").ok())
+        .flatten()
 }
 
 /// Extract an arXiv identifier from a bare id or an arxiv.org URL.
@@ -240,5 +253,15 @@ mod tests {
         assert_eq!(f.due.as_deref(), Some("2026-10-15 23:59"));
         let f = parse("Standup @tomorrow 09:30", afternoon).unwrap();
         assert_eq!(f.due.as_deref(), Some("2026-10-03 09:30"));
+    }
+
+    #[test]
+    fn invalid_time_stays_in_title() {
+        let now = dt("2026-10-02 15:00");
+        let f = parse("Run sweep @tomorrow 25:99", now).expect("tip still created");
+        assert_eq!(f.title, "Run sweep 25:99");
+        assert_eq!(f.due.as_deref(), Some("2026-10-03 23:59"));
+        let f = parse("@today 24:00", now).expect("the bad time is the title");
+        assert_eq!(f.title, "24:00");
     }
 }

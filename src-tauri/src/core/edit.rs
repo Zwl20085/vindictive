@@ -121,7 +121,7 @@ mod tests {
     use super::*;
     use chrono::NaiveDateTime;
 
-    const FILE: &str = "---\ntitle: Submit camera-ready\nkind: deadline\npriority: high\ndue: 2026-10-15\nremind:\n  - -1d\nlocation: Lab 302\nlinks:\n  - https://example.org\nimages: [fig.png]\ntags: [ecce, paper]\nrepeat: weekly on mon\ncolor: '#4A3B6B'\nsize: wide\norder: 2.5\narxiv: 2401.00001\nsnoozed_until: 2026-10-01 12:00\ndone_at: 2026-09-30 10:00\ncreated: 2026-09-01 09:00\ncustom_key: keep me\n---\n\nOld body.\n";
+    const FILE: &str = "---\ntitle: Submit camera-ready\nkind: deadline\npriority: high\ndue: 2026-10-15\nremind:\n  - -1d\nlocation: Lab 302\nlinks:\n  - https://example.org\nimages: [fig.png]\ntags: [ecce, paper]\nrepeat: weekly on mon\ncolor: '#4A3B6B'\nsize: wide\norder: 2.5\narxiv: '2401.00001'\nsnoozed_until: 2026-10-01 12:00\ndone_at: 2026-09-30 10:00\ncreated: 2026-09-01 09:00\ncustom_key: keep me\n---\n\nOld body.\n";
 
     fn tip() -> Tip {
         Tip::parse("tips/2026-camera.md", Some("stamp-1".into()), FILE).unwrap()
