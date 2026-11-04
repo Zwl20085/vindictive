@@ -3,11 +3,13 @@
 All notable changes to Vindictive are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (pre-1.0: a minor
-bump may break things). Entries before 0.4.1 were reconstructed from the
+bump may break things). Entries before 0.5.0 were reconstructed from the
 conventional-commit history; the version a commit shipped in is the first
 `v*` tag that contains it.
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-11-04
 
 ### Added
 
@@ -205,7 +207,8 @@ conventional-commit history; the version a commit shipped in is the first
 
 - First release: an always-on-top tile board synced with GitHub.
 
-[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Zwl20085/vindictive/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Zwl20085/vindictive/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/Zwl20085/vindictive/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Zwl20085/vindictive/compare/v0.3.1...v0.3.2
