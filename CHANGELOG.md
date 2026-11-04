@@ -9,6 +9,31 @@ conventional-commit history; the version a commit shipped in is the first
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-04
+
+### Fixed
+
+- A peeked (lifted) board sank back under every window as soon as you
+  dragged or resized it. It now stays up through drags, resizes, context
+  menus and dialogs, and drops only when you switch to another app, press
+  the hotkey again, or click the tray icon.
+- Bottom-layer boards opened from the tray, Settings… or a second launch
+  were shown beneath everything while holding the keyboard.
+- Closing a lifted board left it pinned on top.
+- Free-docked boards could sit partly off screen.
+- A hotkey owned by another app was saved silently; the save is now
+  rejected and the old hotkey keeps working.
+- The capture bar lost its draft when the hotkey was pressed again or the
+  bar hid; it now opens on the monitor under the cursor and keeps the text.
+- Arrow keys in a context menu moved the board focus; menus stayed open
+  across window hides.
+- A height you set by hand was undone by fit-to-height within 30 s.
+- The clock panel only dragged from its padding.
+- Esc in Settings discarded edits without asking.
+- Quick double Alt+Arrow reorders, Ctrl+Enter double submits, stale drag
+  state after a mid-drag rescan, Edit… from a tile menu returning to the
+  wrong view, and a lightbox left open when its tip vanished.
+
 ## [0.5.1] - 2026-11-04
 
 0.5.0 was tagged but never published: its release build failed on a Tauri
@@ -210,7 +235,8 @@ plugin version mismatch. 0.5.1 is the same code plus that fix.
 
 - First release: an always-on-top tile board synced with GitHub.
 
-[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/Zwl20085/vindictive/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Zwl20085/vindictive/compare/v0.4.0...v0.5.1
 [0.4.0]: https://github.com/Zwl20085/vindictive/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/Zwl20085/vindictive/compare/v0.3.2...v0.3.3
