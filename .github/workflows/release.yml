@@ -6,23 +6,70 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+# Actions are pinned to full commit SHAs; the comment names the tag the SHA
+# was resolved from.
 
 jobs:
-  build:
-    name: Build and publish (Windows)
+  verify:
+    name: Verify version and tests
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          node-version: 20
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+
+      # package.json, src-tauri/Cargo.toml and src-tauri/tauri.conf.json must
+      # all equal the tag without its leading "v" (scripts/bump-version.mjs
+      # sets all three).
+      - name: Tag matches every version field
+        shell: bash
+        run: node scripts/bump-version.mjs --check "${GITHUB_REF_NAME#v}"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  build:
+    name: Build and publish (Windows)
+    needs: verify
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: src-tauri
 
@@ -30,11 +77,15 @@ jobs:
         run: npm ci
 
       - name: Build and upload installers
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signs the installer so the in-app updater accepts it.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Empty password: this only works while the signing key was
+          # generated WITHOUT a password. If the key is ever regenerated with
+          # one, add a TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret and use
+          # ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }} here instead.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.ref_name }}
@@ -43,3 +94,16 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      # Without latest.json and the .sig files the in-app updater silently
+      # sees no update, so a release missing them is a failed release.
+      - name: Release has updater assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          assets="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
+          echo "$assets"
+          echo "$assets" | grep -qx 'latest.json' || { echo "::error::latest.json missing from release $GITHUB_REF_NAME"; exit 1; }
+          echo "$assets" | grep -q '\.sig$' || { echo "::error::no .sig files in release $GITHUB_REF_NAME"; exit 1; }

@@ -13,6 +13,10 @@ live tile, and raises native Windows toasts at remind times.
    gradients, no rounded corners, no borders. The one non-Microsoft thing
    is the typography: titles and the clock are set in a heavy Mincho-like
    serif, an Evangelion title-card gesture. Everything else is Segoe UI.
+   Deliberate exceptions: tile edges (next-up, dock side, focus) are drawn
+   with `inset` box-shadows, which read as solid strips rather than depth;
+   the custom-colour swatch is a `conic-gradient` colour wheel; and the
+   ghosted tile figure fades in through a `linear-gradient` mask.
 3. **Owned data.** Every tip is a plain `.md` file the user can edit anywhere
    without authentication. The app never invents a format that Obsidian or
    `cat` cannot read.
@@ -33,7 +37,7 @@ live tile, and raises native Windows toasts at remind times.
 | Weights          | 700 titles, 400 body, 600 for the NEXT label |
 | Board background | dark `#111113`, light `#F0EFEC`         |
 | Text             | dark `#E8E6E1`, muted `#8F8D88`         |
-| Edge             | white: next-up left edge, overdue top edge, focus ring |
+| Edge (`--edge`)  | next-up left edge, overdue top edge, focus ring. White on dark and cobalt, orange on nerv, dark `#1A1A1D` on light and paper; inside a tile it follows the tile's text colour |
 | Tile unit        | `max(64px, (window width - padding - gaps) / columns)`: tiles fill the window |
 | Tile sizes       | `sm` 1x1, `md` 2x2, `wide` 4x2          |
 | Type scale       | every size is a `clamp()` on `vw` (panel, detail) or `cqh` (inside tiles), so text grows with the window |
@@ -59,7 +63,8 @@ Metro colours were too loud next to real work.
 | done         | `#26272B`, title struck through (only when "show done" is on) | |
 
 A tip may override its colour with the `color` frontmatter key. Text is
-white or near-black by luminance.
+`#F2EFE9` or `#1A1A1A`, whichever has the higher WCAG contrast ratio against
+the tile (light wins a tie), so amber deadline tiles get dark text.
 
 ### Motion
 
@@ -84,7 +89,7 @@ Everything honours `prefers-reduced-motion`.
 │ ◷ 2d 4h        ▲     │  top row: countdown (deadlines) · kind glyph
 │                      │
 │                      │
-│ Submit ECCE          │  bottom-left: title, 300 weight, up to 3 lines
+│ Submit ECCE          │  bottom-left: title, 700 weight, up to 3 lines
 │ camera-ready         │
 └──────────────────────┘
 ```
@@ -110,8 +115,12 @@ The whole board flips to a single detail panel in the tile's colour:
    gif; relative paths load from the tips folder, URLs load directly). Click
    opens the lightbox.
 5. Body: rendered Markdown (sanitised). Inline `<svg>` is allowed (scripts,
-   handlers, `foreignObject` and `style` are stripped). Body images also open
-   the lightbox.
+   handlers, `foreignObject` and `style` are stripped). Body images load only
+   from `https:`, relative paths (the tips folder) or `data:` URLs; `http:`,
+   protocol-relative (`//host`), UNC paths and `srcset` are stripped. Body
+   images also open the lightbox.
+   If the frontmatter had problems (a `due` that does not parse, an unquoted
+   arXiv id, …), the tip's `warnings` are listed here too.
 6. Links list.
 7. Actions (flat text buttons): **Done** · **Snooze 1h** · **Tomorrow** ·
    **Edit** · **Open in editor** · **Show in folder** · **Delete** · **Back**.
@@ -121,7 +130,8 @@ visual language: title (required), kind, priority, due date plus an optional
 time (blank clears it; a date without a time stays a bare date in the file),
 location, tags (space or comma separated) and the Markdown body. `Ctrl+Enter`
 saves, `Esc` or **Cancel** returns to the detail view, and validation errors
-show inline. The backend command `update_tip` validates again
+show inline. With unsaved changes, `Esc` asks for confirmation: a second
+`Esc` within 2 s discards them. The backend command `update_tip` validates again
 (`core/edit.rs`), keeps every other frontmatter key untouched and never
 renames the file (the id is the file name). The form is mounted once: folder
 rescans and the countdown tick do not re-render it, so nothing typed is lost.
@@ -133,7 +143,9 @@ the form. Saving again after that is a deliberate overwrite.
 
 - 20 px top strip, draggable (`data-tauri-drag-region`), contains the sync
   square (green ok, amber reading, red error such as a missing folder) and the
-  VINDICTIVE mark; the last scan time shows on hover. Right-click on the strip → context menu: **Reload tips folder**,
+  VINDICTIVE mark; the last scan time shows on hover. The sync square is a
+  button: click rescans the folder, right-click or the context-menu key opens
+  the strip menu. Right-click on the strip → context menu: **Reload tips folder**,
   **Open tips folder**, **Settings**, **Show done**, **Dock left / right / free**,
   **Quit**.
 - **Panel** (a flat surface block, draggable, `show_panel` setting): clock
@@ -175,6 +187,11 @@ the form. Saving again after that is a deliberate overwrite.
   Show in folder,
   Delete… (a second menu confirms). The same actions live in the
   detail view; there Delete arms on the first click and fires on the second.
+- **Keyboard.** Arrow keys move focus across tiles in display order
+  (Left/Right by one, Up/Down by the column count, stopping at the ends);
+  `Alt+Arrow` on a focused tile moves it, writing `order` like a drag. The
+  face that is flipped away (grid or detail) is `inert`, so Tab never lands
+  on hidden controls.
 - The last tile on the board is a quiet "+" tile. It (or `n`, `+`, `Insert`)
   opens an inline new-tip bar above the grid with the quick-capture syntax.
   Enter creates the file; Esc closes the bar.

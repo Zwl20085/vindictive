@@ -24,7 +24,7 @@ repeat: weekly on mon at 10:00   # daily | weekdays | weekly on mon,thu | monthl
 color: "#FF0097"                 # optional tile colour override
 size: md                         # optional tile size override: sm | md | wide
 order: 2.5                       # optional manual position, written by drag and drop
-arxiv: 2401.12345                # or
+arxiv: '2401.12345'              # quoted, see below; or
 doi: 10.1109/TIE.2024.1234567
 ---
 
@@ -40,13 +40,58 @@ Body in **Markdown**. Checklists, images, links all work.
 </svg>
 ```
 
+## Quote arXiv ids
+
+Write `arxiv: '2401.12345'`, with quotes. Unquoted, YAML reads `2401.10000`
+as the number 2401.1 and drops the trailing zeros; the app rebuilds the id
+when it can, but it adds a warning asking you to quote it. Ids with a prefix
+or version (`arXiv:2401.10000v2`) are text already and need no quotes.
+
+## Warnings
+
+Problems the app finds while reading a tip, such as a `due` or `remind` that
+does not parse, a `repeat` rule it does not understand, or an unquoted arXiv
+id, are collected as a `warnings` list and shown in the tile's detail view.
+The tip still loads with the bad value ignored. Warnings are derived on every
+read and never written to the file; fix the frontmatter and they disappear.
+
+## Tile colour and size
+
+- `color` takes a hex colour, `#RGB` or `#RRGGBB` (case-insensitive, quote it
+  in YAML because `#` starts a comment). Anything else, such as `red` or
+  `rgb(…)`, is kept in the file but ignored, and the tile uses its kind or
+  deadline colour. Text is light or dark, whichever contrasts more with the
+  tile (WCAG contrast ratio).
+- `size` takes `sm` (1x1), `md` (2x2) or `wide` (4x2 grid units). Any other
+  value, or no `size`, means automatic: `wide` for the next-up tip, `md` for
+  high priority or a deadline within seven days, `sm` for the rest.
+- `order` is a number; tiles with an `order` are placed by it, the rest by
+  score.
+
+## The `paper` block
+
+Written by the app after an arXiv or Crossref lookup, but you can write it
+by hand too (for a paper with no arXiv id or DOI). `title` is required
+inside the block; the rest is optional.
+
+```yaml
+paper:
+  title: "Attention Is All You Need"
+  authors: [Ashish Vaswani, Noam Shazeer]   # list of names
+  year: 2017                                 # integer
+  venue: NeurIPS                             # journal or conference
+  url: https://arxiv.org/abs/1706.03762
+```
+
 ## Figures
 
 - `images` entries appear as a thumbnail strip in the tile's detail view and
   the first one is ghosted onto the tile itself when it is `md` or `wide`.
   Click a thumbnail to view it full-window.
 - Body images (`![alt](path)`) are resolved the same way and also open the
-  viewer. Relative paths are resolved from the tips folder.
+  viewer. Relative paths are resolved from the tips folder. Only `https:`,
+  relative and `data:` sources load; `http:`, `//host/...`, UNC paths
+  (`\\server\share`) and `srcset` are stripped.
 - Inline `<svg>` in the body is rendered as-is after sanitising: scripts,
   event handlers, `<style>` and `<foreignObject>` are removed.
 

@@ -4,6 +4,7 @@ dist/
 dist-ssr/
 *.local
 npm-debug.log*
+*.log
 coverage/
 
 # Rust / Tauri

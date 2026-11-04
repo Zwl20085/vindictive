@@ -97,7 +97,7 @@ date / weather panel sits on top, and the whole UI is in English or 简体中文
   weather and keeps an eye on the board: he cheers when you complete a tip,
   sweats while something is overdue, sits back contentedly when nothing is
   left, and sleeps at night.
-- **arXiv and DOI auto-fill.** `arxiv: 2401.12345` or `doi: 10.1109/...` in a
+- **arXiv and DOI auto-fill.** `arxiv: '2401.12345'` (quoted) or `doi: 10.1109/...` in a
   tip fetches title, authors, year and venue into the file.
 - **Recurring tips.** `repeat: weekly on mon at 10:00`. Pressing Done rolls the
   tip forward instead of closing it.
@@ -144,7 +144,7 @@ old repo's `tips/` directory into the new tips folder. Details:
 ### Try it without installing anything
 
 The frontend runs in a plain browser against an in-memory backend with sample
-tips, so you can see the board before you install Rust or create a repo:
+tips, so you can see the board before you install Rust:
 
 ```sh
 git clone https://github.com/Zwl20085/vindictive.git
@@ -155,13 +155,16 @@ npm run dev            # open http://localhost:1420
 
 ### Build from source
 
+Windows only: the app is built, tested and released for Windows 10 21H2+
+and Windows 11. Linux and macOS builds are not supported yet (see Roadmap).
+
 Prerequisites:
 
 - [Rust stable](https://rustup.rs) (1.80 or later)
 - [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
   with the *Desktop development with C++* workload (the Rust MSVC toolchain
   needs its linker)
-- Node 18 or later
+- Node 20 or later (`.nvmrc` pins 20; Node 18 is end-of-life)
 - [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
   (already present on Windows 11)
 
@@ -208,8 +211,10 @@ tags: [ecce, paper]
 | `location` | text | shown on the tile and in detail |
 | `links`, `images`, `tags` | lists | images relative to the tips folder |
 | `repeat` | recurrence rule, see below | Done rolls `due` forward |
-| `color` | any CSS colour | overrides the kind colour |
+| `color` | hex `#RGB` or `#RRGGBB` | overrides the kind colour |
 | `arxiv`, `doi` | id | fills the `paper` block |
+| `size` | `sm` `md` `wide` | overrides the automatic tile size |
+| `order` | number | manual board position, written by drag and drop |
 | `paper`, `snoozed_until`, `done_at`, `created` | | written by the app |
 
 Full reference: [docs/TIP-FORMAT.md](docs/TIP-FORMAT.md).
@@ -235,7 +240,7 @@ monthly on 15 [at HH:MM]
 yearly on 03-15 [at HH:MM]
 ```
 
-Default time is 09:00. Months without the requested day are skipped.
+Default time is 09:00. Days past the end of a month fall on its last day (`on 31` fires on 30 April).
 
 ### How "next up" is chosen
 
