@@ -16,7 +16,7 @@ use crate::core::capture;
 use crate::core::edit::{self, TipEdit};
 use crate::core::template;
 use crate::core::tip::{slugify, Kind, Tip};
-use crate::sync::folder::FolderError;
+use crate::sync::folder::{FolderError, FolderStore};
 use crate::sync::meta;
 use crate::sync::weather::{self, Weather};
 
@@ -46,8 +46,7 @@ pub async fn mark_done(
 ) -> Result<BoardState, String> {
     let tip = find(&state, &id)?;
     let done = tip.complete(now());
-    let msg = format!("vindictive: done \"{}\"", tip.front.title);
-    state.save_tip(&app, done, &msg).await?;
+    state.save_tip(&app, done, "done").await?;
     Ok(state.snapshot())
 }
 
@@ -58,8 +57,7 @@ pub async fn reopen(
     id: String,
 ) -> Result<BoardState, String> {
     let tip = find(&state, &id)?;
-    let msg = format!("vindictive: reopen \"{}\"", tip.front.title);
-    state.save_tip(&app, tip.reopen(), &msg).await?;
+    state.save_tip(&app, tip.reopen(), "reopen").await?;
     Ok(state.snapshot())
 }
 
@@ -77,8 +75,9 @@ pub async fn snooze(
     }
     let tip = find(&state, &id)?;
     let until = now() + Duration::minutes(minutes);
-    let msg = format!("vindictive: snooze \"{}\"", tip.front.title);
-    state.save_tip(&app, tip.snooze_until(until), &msg).await?;
+    state
+        .save_tip(&app, tip.snooze_until(until), "snooze")
+        .await?;
     Ok(state.snapshot())
 }
 
@@ -101,8 +100,9 @@ pub async fn set_color(
     let tip = find(&state, &id)?;
     let mut front = tip.front.clone();
     front.color = color;
-    let msg = format!("vindictive: colour \"{}\"", tip.front.title);
-    state.save_tip(&app, tip.with_front(front), &msg).await?;
+    state
+        .save_tip(&app, tip.with_front(front), "colour")
+        .await?;
     Ok(state.snapshot())
 }
 
@@ -125,8 +125,7 @@ pub async fn set_size(
     let tip = find(&state, &id)?;
     let mut front = tip.front.clone();
     front.size = size;
-    let msg = format!("vindictive: size \"{}\"", tip.front.title);
-    state.save_tip(&app, tip.with_front(front), &msg).await?;
+    state.save_tip(&app, tip.with_front(front), "size").await?;
     Ok(state.snapshot())
 }
 
@@ -146,8 +145,7 @@ pub async fn set_order(
     let tip = find(&state, &id)?;
     let mut front = tip.front.clone();
     front.order = order;
-    let msg = format!("vindictive: move \"{}\"", tip.front.title);
-    state.save_tip(&app, tip.with_front(front), &msg).await?;
+    state.save_tip(&app, tip.with_front(front), "move").await?;
     Ok(state.snapshot())
 }
 
@@ -165,9 +163,25 @@ pub async fn update_tip(
     let tip = find(&state, &id)?;
     check_base(&tip, base.as_deref())?;
     let edited = edit::apply(&tip, edit)?;
-    let msg = format!("vindictive: edit \"{}\"", edited.front.title);
-    state.save_tip(&app, edited, &msg).await?;
+    state.save_tip(&app, edited, "edit").await?;
     Ok(state.snapshot())
+}
+
+/// A file name for a new capture that is free both on the board and on disk
+/// (a broken or not yet scanned file is in the folder but not on the board).
+/// `also_taken` is a name that was just found to exist.
+fn capture_name(
+    state: &AppState,
+    store: &FolderStore,
+    stem: &str,
+    also_taken: Option<&str>,
+) -> String {
+    state.with(|i| {
+        i.board.unique_file_name_where(stem, |name| {
+            also_taken.is_some_and(|t| t.eq_ignore_ascii_case(name))
+                || store.resolve(name).map(|p| p.exists()).unwrap_or(false)
+        })
+    })
 }
 
 /// The form must have been opened on the version of the file the board has now.
@@ -197,10 +211,16 @@ fn is_hex_color(value: &str) -> bool {
     (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// Open the tip's file in the editor; returns the file path.
+/// Open the tip's file in the editor; returns the file path. Async and on a
+/// blocking thread, so a slow or waiting editor launch never freezes the UI.
 #[tauri::command]
-pub fn edit_local(state: State<'_, AppState>, id: String) -> Result<String, String> {
-    editor::open(&state, &id).map(|p| p.display().to_string())
+pub async fn edit_local(app: AppHandle, id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = AppState::from_app(&app);
+        editor::open(&state, &id).map(|p| p.display().to_string())
+    })
+    .await
+    .map_err(|e| format!("editor launch failed: {e}"))?
 }
 
 /// Show the tip's file selected in Explorer.
@@ -252,16 +272,22 @@ pub async fn delete_tip(
         .clone()
         .ok_or("this tip has not been loaded from its file yet; try again in a moment")?;
     let store = state.store()?;
-    log::info!("vindictive: delete \"{}\"", tip.front.title);
-    match store.delete(&tip.path, &stamp) {
+    log::info!("vindictive: delete {id}");
+    let path = tip.path.clone();
+    let deleted = tauri::async_runtime::spawn_blocking(move || {
+        store.delete(&path, &stamp).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("delete failed: {e}"))?;
+    match deleted {
         Ok(()) => {
-            state.replace_board(state.board().remove(&id));
+            state.update_board(|board| board.remove(&id));
             state.emit(&app);
             Ok(state.snapshot())
         }
         Err(e) => {
             let _ = state.sync(&app).await;
-            Err(e.to_string())
+            Err(e)
         }
     }
 }
@@ -289,12 +315,19 @@ pub async fn create_tip(
         created_at.format("%Y-%m-%d"),
         slugify(&front.title)
     );
-    let path = state.board().unique_file_name(&stem);
-    let title = front.title.clone();
+    let store = state.store()?;
     let zh = settings.language == Language::Zh;
-    let (tip, text) = template::render(&path, front, zh).map_err(|e| e.to_string())?;
-    let msg = format!("vindictive: capture \"{title}\"");
-    let saved = state.save_tip_text(&app, tip, &text, &msg).await?;
+    let path = capture_name(&state, &store, &stem, None);
+    let (tip, body) = template::render(&path, front.clone(), zh).map_err(|e| e.to_string())?;
+    let saved = match state.save_tip_text(&app, tip, &body, "capture").await {
+        // Another device created the same name just now: take the next one.
+        Err(e) if e == FolderError::Exists(path.clone()).to_string() => {
+            let path = capture_name(&state, &store, &stem, Some(&path));
+            let (tip, body) = template::render(&path, front, zh).map_err(|e| e.to_string())?;
+            state.save_tip_text(&app, tip, &body, "capture").await?
+        }
+        other => other?,
+    };
     if saved.front.arxiv.is_some() || saved.front.doi.is_some() {
         let app2 = app.clone();
         let id = saved.id.clone();
@@ -343,18 +376,18 @@ pub async fn fetch_image(state: State<'_, AppState>, path: String) -> Result<Str
     if let Some(cached) = state.cached_image(&repo_path) {
         return Ok(cached);
     }
-    let bytes = state
-        .store()?
-        .read_bytes(&repo_path)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() > MAX_IMAGE_BYTES {
-        return Err("image is larger than 8 MB".into());
-    }
-    let data_url = format!(
-        "data:{};base64,{}",
-        mime_for(&repo_path),
-        B64.encode(&bytes)
-    );
+    let store = state.store()?;
+    let rel = repo_path.clone();
+    let data_url = tauri::async_runtime::spawn_blocking(move || {
+        let bytes = read_capped(&store, &rel, MAX_IMAGE_BYTES)?;
+        Ok::<_, String>(format!(
+            "data:{};base64,{}",
+            mime_for(&rel),
+            B64.encode(&bytes)
+        ))
+    })
+    .await
+    .map_err(|e| format!("image read failed: {e}"))??;
     state.cache_image(&repo_path, &data_url);
     Ok(data_url)
 }
@@ -427,11 +460,7 @@ pub fn quit(app: AppHandle) {
 }
 
 fn find(state: &State<'_, AppState>, id: &str) -> Result<Tip, String> {
-    state
-        .board()
-        .get(id)
-        .cloned()
-        .ok_or_else(|| format!("tip {id} not found"))
+    state.tip(id).ok_or_else(|| format!("tip {id} not found"))
 }
 
 /// Fetch paper metadata for a tip with an arXiv id or DOI.
@@ -453,8 +482,28 @@ pub async fn enrich(app: &AppHandle, id: &str) -> Result<(), String> {
         front.kind = Kind::Reading;
     }
     let enriched = current.with_front(front);
-    let msg = format!("vindictive: paper metadata for \"{}\"", current.front.title);
-    state.save_tip(app, enriched, &msg).await.map(|_| ())
+    state
+        .save_tip(app, enriched, "paper metadata")
+        .await
+        .map(|_| ())
+}
+
+/// The bytes of `rel`, refusing files over `max` before reading them.
+fn read_capped(store: &FolderStore, rel: &str, max: usize) -> Result<Vec<u8>, String> {
+    let too_big = || format!("image is larger than {} MB", max / (1024 * 1024));
+    let path = store.resolve(rel).map_err(|e| e.to_string())?;
+    let len = std::fs::metadata(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?
+        .len();
+    if len > max as u64 {
+        return Err(too_big());
+    }
+    let bytes = store.read_bytes(rel).map_err(|e| e.to_string())?;
+    // The file may have grown between the size check and the read.
+    if bytes.len() > max {
+        return Err(too_big());
+    }
+    Ok(bytes)
 }
 
 /// An image reference relative to the tips folder, with `/` separators.
@@ -535,6 +584,36 @@ title: A
         let err = check_base(&tip, Some("v1")).unwrap_err();
         assert!(err.contains("changed on disk"), "{err}");
         assert!(check_base(&tip, None).is_err());
+    }
+
+    #[test]
+    fn large_images_are_refused_before_reading() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("small.png"), [1u8; 4]).unwrap();
+        std::fs::write(tmp.path().join("big.png"), [1u8; 5]).unwrap();
+        let store = FolderStore::open(tmp.path()).unwrap();
+        assert_eq!(read_capped(&store, "small.png", 4).unwrap().len(), 4);
+        assert!(read_capped(&store, "big.png", 4).is_err());
+        assert!(read_capped(&store, "missing.png", 4).is_err());
+    }
+
+    #[test]
+    fn capture_names_skip_files_on_disk_and_known_clashes() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = AppState::load(super::super::storage::Storage::new(
+            data.path().to_path_buf(),
+        ));
+        let store = FolderStore::open(folder.path()).unwrap();
+        assert_eq!(capture_name(&state, &store, "note", None), "note.md");
+        // On disk but not on the board (say, it failed to parse).
+        std::fs::write(folder.path().join("note.md"), "broken").unwrap();
+        assert_eq!(capture_name(&state, &store, "note", None), "note-2.md");
+        // A name the folder just reported as taken.
+        assert_eq!(
+            capture_name(&state, &store, "note", Some("note-2.md")),
+            "note-3.md"
+        );
     }
 
     #[test]

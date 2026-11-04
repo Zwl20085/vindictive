@@ -63,9 +63,19 @@ pub struct FileEntry {
     pub stamp: String,
 }
 
+impl FileEntry {
+    /// True if this file looks like a OneDrive conflict copy of another file
+    /// in `listing` (`notes-DESKTOP-AB12CD3.md` next to `notes.md`).
+    pub fn is_conflict_copy(&self, listing: &[FileEntry]) -> bool {
+        conflict_original(&self.path, listing).is_some()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FolderStore {
     root: PathBuf,
+    /// `root` with links resolved, for the containment check in `resolve`.
+    canonical_root: PathBuf,
 }
 
 impl FolderStore {
@@ -74,8 +84,12 @@ impl FolderStore {
         if !root.is_dir() {
             return Err(FolderError::Missing(root.to_path_buf()));
         }
+        let canonical_root = root
+            .canonicalize()
+            .map_err(|_| FolderError::Missing(root.to_path_buf()))?;
         Ok(Self {
             root: root.to_path_buf(),
+            canonical_root,
         })
     }
 
@@ -140,7 +154,7 @@ impl FolderStore {
             file_name(&path),
             std::process::id()
         ));
-        let result = std::fs::write(&tmp, text)
+        let result = write_durably(&tmp, text)
             .map_err(|e| io("cannot write", &tmp, e))
             // A rename keeps the temp file's time and length, so this is the
             // stamp of the new file even if something touches it right after.
@@ -161,17 +175,37 @@ impl FolderStore {
             .map_err(|e| e.unwrap_or_else(|e| io("cannot delete", &path, e)))
     }
 
-    /// Absolute path of `rel`, refusing anything that could leave the folder.
+    /// Absolute path of `rel`, refusing anything that could leave the folder:
+    /// non-plain components, `:` (drive-relative paths and NTFS alternate
+    /// data streams), and links or junctions that point outside it.
     pub fn resolve(&self, rel: &str) -> Result<PathBuf> {
+        let bad = || FolderError::BadPath(rel.to_string());
         let rel_path = Path::new(rel);
         let ok = !rel.trim().is_empty()
+            && !rel.contains(':')
             && rel_path
                 .components()
                 .all(|c| matches!(c, Component::Normal(_)));
         if !ok {
-            return Err(FolderError::BadPath(rel.to_string()));
+            return Err(bad());
         }
-        Ok(self.root.join(rel_path))
+        let path = self.root.join(rel_path);
+        // The deepest part that exists must resolve to inside the folder; a
+        // file still to be created is checked through its parent folder.
+        let mut probe = path.as_path();
+        loop {
+            match probe.canonicalize() {
+                Ok(real) if real.starts_with(&self.canonical_root) => return Ok(path),
+                Ok(_) => return Err(bad()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    if probe == self.root {
+                        return Err(FolderError::Missing(self.root.clone()));
+                    }
+                    probe = probe.parent().ok_or_else(bad)?;
+                }
+                Err(e) => return Err(io("cannot inspect", probe, e)),
+            }
+        }
     }
 
     fn check_unchanged(&self, rel: &str, path: &Path, expected: Option<&str>) -> Result<()> {
@@ -261,6 +295,93 @@ fn remove_if_stale(path: &Path) {
 fn is_tip_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with(".md") && !name.starts_with('.') && !name.starts_with('~')
+}
+
+/// The file in `listing` that `name` is a OneDrive conflict copy of, if any.
+///
+/// OneDrive keeps both sides of a conflict by renaming one to
+/// `<stem>-<ComputerName>[-<n>].<ext>`; Explorer-style copies are
+/// `<stem> (<n>).<ext>`. A name only counts when the original is also in
+/// the listing, so an ordinary file like `plan-B.md` is not flagged unless
+/// `plan.md` exists too.
+pub fn conflict_original<'a>(name: &str, listing: &'a [FileEntry]) -> Option<&'a str> {
+    let (stem, ext) = name.rsplit_once('.')?;
+    conflict_stems(stem).into_iter().find_map(|base| {
+        let original = format!("{base}.{ext}");
+        listing
+            .iter()
+            .find(|f| f.path.eq_ignore_ascii_case(&original))
+            .map(|f| f.path.as_str())
+    })
+}
+
+/// Every conflict copy in `listing`, paired with its original.
+pub fn conflict_copies(listing: &[FileEntry]) -> Vec<(&str, &str)> {
+    listing
+        .iter()
+        .filter_map(|f| Some((f.path.as_str(), conflict_original(&f.path, listing)?)))
+        .collect()
+}
+
+/// One line for the sync summary, `None` when there are no conflict copies.
+pub fn conflict_summary(listing: &[FileEntry]) -> Option<String> {
+    let copies = conflict_copies(listing);
+    let (first, original) = copies.first()?;
+    let more = match copies.len() {
+        1 => String::new(),
+        n => format!(" and {} more", n - 1),
+    };
+    Some(format!(
+        "OneDrive kept a conflict copy: {first} (of {original}){more}; merge and delete the copy"
+    ))
+}
+
+/// Stems `stem` could be a conflict copy of, most specific first.
+fn conflict_stems(stem: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    // `notes (2)`
+    if let Some(base) = stem.strip_suffix(')').and_then(|s| {
+        let (base, n) = s.rsplit_once(" (")?;
+        (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())).then_some(base)
+    }) {
+        out.push(base);
+    }
+    // `notes-DESKTOP-AB12CD3`, `notes-WORKPC-2`: try every `-` as the split.
+    for (i, _) in stem.match_indices('-') {
+        let (base, suffix) = (&stem[..i], &stem[i + 1..]);
+        if !base.is_empty() && is_computer_name_suffix(suffix) {
+            out.push(base);
+        }
+    }
+    out
+}
+
+/// A Windows computer name as OneDrive writes it, upper case, optionally
+/// followed by `-<n>`: at most 15 characters of `A-Z`, `0-9` and `-`,
+/// with at least one letter.
+fn is_computer_name_suffix(suffix: &str) -> bool {
+    let host = match suffix.rsplit_once('-') {
+        Some((host, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => host,
+        _ => suffix,
+    };
+    let shaped = |s: &str| {
+        (1..=15).contains(&s.len())
+            && !s.starts_with('-')
+            && !s.ends_with('-')
+            && s.bytes().any(|b| b.is_ascii_uppercase())
+            && s.bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-')
+    };
+    shaped(host) || shaped(suffix)
+}
+
+/// Write `text` to a new file and flush it to disk before it is renamed
+/// over the original, so a crash cannot leave an empty tip behind.
+fn write_durably(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(text.as_bytes())?;
+    file.sync_all()
 }
 
 fn stamp_of(meta: &std::fs::Metadata) -> String {
@@ -414,6 +535,119 @@ mod tests {
             assert!(s.resolve(bad).is_err(), "{bad}");
         }
         assert!(s.resolve("figures/plot.png").is_ok());
+    }
+
+    #[test]
+    fn colons_and_streams_are_refused() {
+        let (s, _dir) = store();
+        for bad in ["a.md:evil", "a.md::$DATA", "C:x.md", "sub/b:c.md"] {
+            assert!(
+                matches!(s.resolve(bad), Err(FolderError::BadPath(_))),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn existing_and_new_files_resolve_inside_the_folder() {
+        let (s, dir) = store();
+        std::fs::write(dir.path().join("a.md"), "x").unwrap();
+        assert_eq!(s.resolve("a.md").unwrap(), dir.path().join("a.md"));
+        assert_eq!(s.resolve("new.md").unwrap(), dir.path().join("new.md"));
+        assert_eq!(
+            s.resolve("no/such/dir/x.md").unwrap(),
+            dir.path().join("no/such/dir/x.md")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn links_out_of_the_folder_are_refused() {
+        let (s, dir) = store();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "x").unwrap();
+        // Creating symlinks needs Developer Mode or admin; skip without it.
+        if std::os::windows::fs::symlink_dir(outside.path(), dir.path().join("out")).is_err() {
+            return;
+        }
+        assert!(matches!(
+            s.resolve("out/secret.md"),
+            Err(FolderError::BadPath(_))
+        ));
+        assert!(matches!(
+            s.resolve("out/new.md"),
+            Err(FolderError::BadPath(_))
+        ));
+    }
+
+    fn entries(names: &[&str]) -> Vec<FileEntry> {
+        names
+            .iter()
+            .map(|n| FileEntry {
+                path: n.to_string(),
+                stamp: "1-1".into(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn detects_onedrive_conflict_copies() {
+        let listing = entries(&[
+            "notes.md",
+            "notes-DESKTOP-AB12CD3.md",
+            "plan.md",
+            "plan-LAPTOP-9X-2.md",
+            "todo (1).md",
+            "todo.md",
+            "2026-10-01-coil.md",
+            "2026-10-01-coil-check.md",
+            "orphan-DESKTOP-ZZ.md",
+            "report-B.md",
+        ]);
+        let copies = conflict_copies(&listing);
+        assert_eq!(
+            copies,
+            vec![
+                ("notes-DESKTOP-AB12CD3.md", "notes.md"),
+                ("plan-LAPTOP-9X-2.md", "plan.md"),
+                ("todo (1).md", "todo.md"),
+            ]
+        );
+        assert!(listing[1].is_conflict_copy(&listing));
+        assert!(!listing[0].is_conflict_copy(&listing));
+        assert!(
+            !listing[7].is_conflict_copy(&listing),
+            "lower-case slug is not a computer name"
+        );
+        assert!(!listing[8].is_conflict_copy(&listing), "no original");
+        let summary = conflict_summary(&listing).unwrap();
+        assert!(summary.contains("notes-DESKTOP-AB12CD3.md (of notes.md) and 2 more"));
+        assert_eq!(conflict_summary(&entries(&["a.md"])), None);
+    }
+
+    #[test]
+    fn computer_name_shapes() {
+        for ok in ["DESKTOP-AB12CD3", "WORKPC", "PC-2", "LAPTOP-9X-12"] {
+            assert!(is_computer_name_suffix(ok), "{ok}");
+        }
+        for no in ["check", "Desktop", "123", "-X", "X-", "ABCDEFGHIJKLMNOPQ"] {
+            assert!(!is_computer_name_suffix(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn writes_leave_no_temp_files_behind() {
+        let (s, dir) = store();
+        s.write_text("a.md", "durable", None).unwrap();
+        let names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["a.md"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.md")).unwrap(),
+            "durable"
+        );
     }
 
     #[test]

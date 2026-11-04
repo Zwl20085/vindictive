@@ -2,6 +2,10 @@
 //! through their geocoding endpoint first, then the forecast endpoint is
 //! queried for the current conditions and today's range.
 
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
@@ -13,12 +17,17 @@ const UA: &str = concat!(
     " (https://github.com/Zwl20085/vindictive)"
 );
 const TIMEOUT_SECS: u64 = 15;
+const CONNECT_TIMEOUT_SECS: u64 = 5;
+/// Longest wait between attempts while the weather service is unreachable.
+pub const MAX_BACKOFF: Duration = Duration::from_secs(30 * 60);
 pub const MAX_LOCATION_CHARS: usize = 80;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WeatherError {
     #[error("network error: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("weather unavailable ({0})")]
+    Offline(String),
     #[error("no place called {0:?}")]
     NotFound(String),
     #[error("unexpected weather response: {0}")]
@@ -50,15 +59,87 @@ pub struct Place {
     pub longitude: f64,
 }
 
-fn http() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
+/// The one HTTP client of the app (weather and paper metadata), so the
+/// connection pool and TLS setup are shared instead of rebuilt per request.
+pub(crate) fn http() -> reqwest::Result<&'static reqwest::Client> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
         .user_agent(UA)
-        .timeout(std::time::Duration::from_secs(TIMEOUT_SECS))
-        .build()
+        .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(TIMEOUT_SECS))
+        .build()?;
+    // A racing first call may have set it already; either client is fine.
+    Ok(CLIENT.get_or_init(|| client))
 }
 
-/// Resolve a free-text place name to coordinates.
+/// Geocoded places by normalised query; place names do not move.
+static PLACES: Mutex<BTreeMap<String, Place>> = Mutex::new(BTreeMap::new());
+/// Per location: the last good reading and the current failure streak.
+static HEALTH: Mutex<BTreeMap<String, Health>> = Mutex::new(BTreeMap::new());
+/// Bound on both maps; the user has one location, this only stops growth
+/// while they type a few different ones.
+const MAX_CACHED_PLACES: usize = 16;
+
+#[derive(Debug, Clone, Default)]
+struct Health {
+    last_good: Option<Weather>,
+    failures: u32,
+    last_error_at: Option<Instant>,
+    last_error: String,
+}
+
+/// Wait before the next attempt after `failures` failures in a row:
+/// nothing, then 1, 2, 4, ... minutes, capped at `MAX_BACKOFF`.
+pub fn backoff(failures: u32) -> Duration {
+    if failures == 0 {
+        return Duration::ZERO;
+    }
+    let minutes = 1u64 << (failures - 1).min(16);
+    Duration::from_secs(minutes * 60).min(MAX_BACKOFF)
+}
+
+/// True if the network may be tried again `since_error` after the last
+/// failure of a streak of `failures`.
+pub fn may_retry(failures: u32, since_error: Duration) -> bool {
+    since_error >= backoff(failures)
+}
+
+fn cache_key(location: &str) -> String {
+    location
+        .trim()
+        .chars()
+        .take(MAX_LOCATION_CHARS)
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn remember<V>(map: &mut BTreeMap<String, V>, key: String, value: V) {
+    if map.len() >= MAX_CACHED_PLACES && !map.contains_key(&key) {
+        map.clear();
+    }
+    map.insert(key, value);
+}
+
+/// Resolve a free-text place name to coordinates, from memory when it was
+/// resolved before.
 pub async fn geocode(query: &str) -> Result<Place, WeatherError> {
+    let key = cache_key(query);
+    if let Some(place) = lock(&PLACES).get(&key).cloned() {
+        return Ok(place);
+    }
+    let place = geocode_uncached(query).await?;
+    remember(&mut lock(&PLACES), key, place.clone());
+    Ok(place)
+}
+
+async fn geocode_uncached(query: &str) -> Result<Place, WeatherError> {
     let query: String = query.trim().chars().take(MAX_LOCATION_CHARS).collect();
     if query.is_empty() {
         return Err(WeatherError::NotFound(query));
@@ -100,9 +181,58 @@ pub async fn current(place: &Place, fetched_at: NaiveDateTime) -> Result<Weather
 }
 
 /// Geocode then fetch, in one call.
+///
+/// After a failure the network is left alone for a growing while (see
+/// `backoff`), so polling while offline costs nothing instead of a timeout
+/// each time. During that while, and on any failure, the last good reading
+/// for this location is returned (with its own `fetched_at`) if there is one.
 pub async fn fetch(location: &str, fetched_at: NaiveDateTime) -> Result<Weather, WeatherError> {
-    let place = geocode(location).await?;
-    current(&place, fetched_at).await
+    let key = cache_key(location);
+    let waiting = lock(&HEALTH).get(&key).and_then(|h| {
+        let since = h.last_error_at?.elapsed();
+        (!may_retry(h.failures, since)).then(|| (h.clone(), backoff(h.failures) - since))
+    });
+    if let Some((health, left)) = waiting {
+        return health.last_good.ok_or_else(|| {
+            WeatherError::Offline(format!(
+                "{}; retrying in {} s",
+                health.last_error,
+                left.as_secs()
+            ))
+        });
+    }
+    let result = match geocode(location).await {
+        Ok(place) => current(&place, fetched_at).await,
+        Err(e) => Err(e),
+    };
+    let mut all = lock(&HEALTH);
+    let health = all.get(&key).cloned().unwrap_or_default();
+    match result {
+        Ok(weather) => {
+            let healthy = Health {
+                last_good: Some(weather.clone()),
+                ..Health::default()
+            };
+            remember(&mut all, key, healthy);
+            Ok(weather)
+        }
+        Err(e) => {
+            let failures = health.failures.saturating_add(1);
+            log::warn!(
+                "weather for {location:?} failed ({e}); next try in {} s",
+                backoff(failures).as_secs()
+            );
+            let last_good = health.last_good.clone();
+            let failed = Health {
+                last_good: health.last_good,
+                failures,
+                last_error_at: Some(Instant::now()),
+                last_error: e.to_string(),
+            };
+            remember(&mut all, key, failed);
+            last_good.ok_or(e)
+        }
+    }
 }
 
 /// First result of a geocoding response.
@@ -202,6 +332,43 @@ mod tests {
         assert!(parse_forecast(&json, "x", at()).is_err());
         let json = serde_json::json!({"current": {"weather_code": 3}});
         assert!(parse_forecast(&json, "x", at()).is_err());
+    }
+
+    #[test]
+    fn backoff_doubles_from_one_minute_up_to_thirty() {
+        let minutes: Vec<u64> = (0..=8).map(|n| backoff(n).as_secs() / 60).collect();
+        assert_eq!(minutes, vec![0, 1, 2, 4, 8, 16, 30, 30, 30]);
+        assert_eq!(backoff(u32::MAX), MAX_BACKOFF);
+        assert!(may_retry(0, Duration::ZERO));
+        assert!(!may_retry(1, Duration::from_secs(59)));
+        assert!(may_retry(1, Duration::from_secs(60)));
+        assert!(!may_retry(6, Duration::from_secs(29 * 60)));
+        assert!(may_retry(40, MAX_BACKOFF));
+    }
+
+    #[test]
+    fn cache_keys_ignore_case_and_padding() {
+        assert_eq!(cache_key("  Tokyo "), cache_key("tokyo"));
+        assert_ne!(cache_key("Tokyo"), cache_key("Kyoto"));
+        let mut map = BTreeMap::new();
+        for i in 0..MAX_CACHED_PLACES {
+            remember(&mut map, i.to_string(), i);
+        }
+        remember(&mut map, "0".into(), 0);
+        assert_eq!(
+            map.len(),
+            MAX_CACHED_PLACES,
+            "updating a key keeps the rest"
+        );
+        remember(&mut map, "new".into(), 99);
+        assert_eq!(map.len(), 1, "a full map starts over");
+    }
+
+    #[test]
+    fn shared_client_is_built_once() {
+        let a = http().unwrap() as *const reqwest::Client;
+        let b = http().unwrap() as *const reqwest::Client;
+        assert_eq!(a, b);
     }
 
     #[test]

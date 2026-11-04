@@ -2,14 +2,11 @@
 
 use crate::core::tip::Paper;
 
+// The shared client (same user agent and timeouts) lives with the weather code.
+use super::weather::http;
+
 const ARXIV_API: &str = "https://export.arxiv.org/api/query";
 const CROSSREF_API: &str = "https://api.crossref.org/works";
-const UA: &str = concat!(
-    "vindictive/",
-    env!("CARGO_PKG_VERSION"),
-    " (https://github.com/Zwl20085/vindictive)"
-);
-const TIMEOUT_SECS: u64 = 15;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MetaError {
@@ -17,13 +14,6 @@ pub enum MetaError {
     Http(#[from] reqwest::Error),
     #[error("no metadata found for {0}")]
     NotFound(String),
-}
-
-fn http() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent(UA)
-        .timeout(std::time::Duration::from_secs(TIMEOUT_SECS))
-        .build()
 }
 
 pub async fn fetch_arxiv(id: &str) -> Result<Paper, MetaError> {

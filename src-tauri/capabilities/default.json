@@ -1,20 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Board and capture windows: IPC, dragging, showing/hiding, opening links, toasts.",
+  "description": "Board and capture windows: IPC, events, dragging by the drag regions, opening links. Window showing/hiding and toasts run from Rust and need no grant.",
   "windows": ["main", "capture"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
-    "core:window:allow-show",
-    "core:window:allow-hide",
-    "core:window:allow-set-focus",
-    "core:window:allow-set-size",
-    "core:window:allow-inner-size",
-    "core:window:allow-outer-size",
-    "core:window:allow-is-visible",
-    "opener:default",
-    "notification:default",
-    "log:default"
+    "opener:default"
   ]
 }

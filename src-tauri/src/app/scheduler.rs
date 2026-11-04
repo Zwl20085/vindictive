@@ -1,10 +1,13 @@
 //! Background loop: rescan the tips folder and raise reminder toasts.
 
+use std::collections::BTreeMap;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use tauri::AppHandle;
 
 use super::notify;
+use super::settings::Language;
 use super::state::{now, AppState};
 
 /// How often the tips folder is rescanned. A scan of an unchanged folder is
@@ -43,13 +46,14 @@ fn announce_new_tips(app: &AppHandle, state: &AppState, new_ids: &[String]) {
     if new_ids.is_empty() || !state.settings().notify_new_tips {
         return;
     }
-    let board = state.board();
-    let titles: Vec<String> = new_ids
-        .iter()
-        .filter_map(|id| board.get(id))
-        .filter(|t| t.is_open())
-        .map(|t| t.display_title().to_string())
-        .collect();
+    let titles: Vec<String> = state.with(|i| {
+        new_ids
+            .iter()
+            .filter_map(|id| i.board.get(id))
+            .filter(|t| t.is_open())
+            .map(|t| t.display_title().to_string())
+            .collect()
+    });
     match titles.as_slice() {
         [] => {}
         [one] => notify::show(app, "New tip", one),
@@ -70,14 +74,32 @@ fn announce_new_tips(app: &AppHandle, state: &AppState, new_ids: &[String]) {
     }
 }
 
+/// Failed attempts per reminder key, so a toast that cannot be shown is
+/// retried on the next ticks but not forever (see `notify::settle`).
+static TOAST_FAILURES: Mutex<BTreeMap<String, u32>> = Mutex::new(BTreeMap::new());
+
 fn fire_reminders(app: &AppHandle, state: &AppState) {
     let at = now();
     let toasts = state.with(|i| notify::due_reminders(&i.board.tips, &i.fired, at));
     if toasts.is_empty() {
         return;
     }
-    for t in &toasts {
-        notify::show(app, &t.title, &t.body);
+    let zh = state.settings().language == Language::Zh;
+    let mut fired = Vec::new();
+    {
+        let mut failures = TOAST_FAILURES.lock().unwrap_or_else(|p| p.into_inner());
+        for d in notify::plan_delivery(toasts, zh) {
+            let shown = match notify::try_show(app, &d.title, &d.body) {
+                Ok(()) => true,
+                Err(e) => {
+                    log::warn!("toast failed ({}), retrying next tick: {e}", d.title);
+                    false
+                }
+            };
+            fired.extend(notify::settle(&mut failures, d.keys, shown));
+        }
     }
-    state.record_fired(toasts.into_iter().map(|t| t.key), at);
+    if !fired.is_empty() {
+        state.record_fired(fired, at);
+    }
 }

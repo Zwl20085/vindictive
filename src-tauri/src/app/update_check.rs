@@ -19,6 +19,19 @@ use super::{notify, updater};
 pub const FIRST_CHECK_DELAY: Duration = Duration::from_secs(45);
 /// Then check again this often.
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+/// After a failed check (no network at start-up, say), try again this soon...
+pub const RETRY_INTERVAL: Duration = Duration::from_secs(60 * 60);
+/// ...this many times in a row before falling back to the daily rhythm.
+pub const MAX_RETRIES: u32 = 3;
+
+/// Wait before the next round, given how many checks in a row have failed.
+pub fn next_delay(failures: u32) -> Duration {
+    if (1..=MAX_RETRIES).contains(&failures) {
+        RETRY_INTERVAL
+    } else {
+        CHECK_INTERVAL
+    }
+}
 
 /// Versions already announced in this run.
 static ANNOUNCED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
@@ -43,21 +56,30 @@ pub fn toast_text(version: &str) -> (String, String) {
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK_DELAY).await;
+        let mut failures = 0u32;
         loop {
             if AppState::from_app(&app).settings().auto_update_check {
-                check_quietly(&app).await;
+                failures = match check_quietly(&app).await {
+                    Ok(()) => 0,
+                    // Past the retries: back to daily, and a fresh streak.
+                    Err(()) if failures >= MAX_RETRIES => 0,
+                    Err(()) => failures + 1,
+                };
             } else {
                 log::info!("update check: switched off in settings");
+                failures = 0;
             }
-            tokio::time::sleep(CHECK_INTERVAL).await;
+            tokio::time::sleep(next_delay(failures)).await;
         }
     });
 }
 
-async fn check_quietly(app: &AppHandle) {
+/// `Err` when the check itself failed (network, endpoint), so it is retried
+/// sooner than the daily round.
+async fn check_quietly(app: &AppHandle) -> Result<(), ()> {
     // A manual check or install is running: it reports on its own.
     let Some(_busy) = updater::Busy::start() else {
-        return;
+        return Ok(());
     };
     let current = app.package_info().version.to_string();
     let result = match app.updater() {
@@ -67,8 +89,12 @@ async fn check_quietly(app: &AppHandle) {
     match result {
         Ok(Some(update)) => announce(app, &update.version, &current),
         Ok(None) => log::info!("update check: {current} is the latest"),
-        Err(e) => log::info!("update check skipped: {e}"),
+        Err(e) => {
+            log::warn!("update check failed: {e}");
+            return Err(());
+        }
     }
+    Ok(())
 }
 
 fn announce(app: &AppHandle, version: &str, current: &str) {
@@ -126,5 +152,15 @@ mod tests {
         assert!(FIRST_CHECK_DELAY >= Duration::from_secs(30));
         assert!(FIRST_CHECK_DELAY <= Duration::from_secs(60));
         assert_eq!(CHECK_INTERVAL, Duration::from_secs(86_400));
+    }
+
+    #[test]
+    fn failed_checks_retry_hourly_a_few_times() {
+        assert_eq!(next_delay(0), CHECK_INTERVAL);
+        for n in 1..=MAX_RETRIES {
+            assert_eq!(next_delay(n), RETRY_INTERVAL, "retry {n}");
+        }
+        assert_eq!(next_delay(MAX_RETRIES + 1), CHECK_INTERVAL);
+        assert_eq!(RETRY_INTERVAL, Duration::from_secs(3600));
     }
 }
