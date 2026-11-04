@@ -43,6 +43,9 @@ const STRINGS = {
     tags: 'tags',
     snoozed: 'snoozed',
     figures: 'figures',
+    warningsHeading: 'Parse warnings',
+    tileWarnings: 'has parse warnings',
+    boardLabel: 'Tips',
     paperNotFetched: 'metadata not fetched yet',
     done: 'Done',
     reopen: 'Reopen',
@@ -128,6 +131,12 @@ const STRINGS = {
     clawdWorried: '{n} overdue',
     clawdRelaxed: 'all done',
     clawdWalking: '{n} to do',
+    panelLabel: 'Clock and weather',
+    invalidDock: 'invalid dock',
+    invalidTheme: 'invalid theme',
+    invalidLanguage: 'invalid language',
+    hotkeyRequired: 'enter a capture hotkey',
+    discardHint: 'Unsaved changes: press Esc again to discard',
   },
   zh: {
     appName: '复仇者',
@@ -164,6 +173,9 @@ const STRINGS = {
     tags: '标签',
     snoozed: '推迟至',
     figures: '图表',
+    warningsHeading: '解析警告',
+    tileWarnings: '有解析警告',
+    boardLabel: '事项',
     paperNotFetched: '尚未获取文献信息',
     done: '完成',
     reopen: '重新打开',
@@ -249,6 +261,12 @@ const STRINGS = {
     clawdWorried: '{n} 项逾期',
     clawdRelaxed: '全部完成',
     clawdWalking: '{n} 项待办',
+    panelLabel: '时钟与天气',
+    invalidDock: '无效的停靠方式',
+    invalidTheme: '无效的主题',
+    invalidLanguage: '无效的语言',
+    hotkeyRequired: '请填写快速记录快捷键',
+    discardHint: '有未保存的修改：再按一次 Esc 放弃',
   },
 } as const;
 
@@ -274,6 +292,17 @@ export function locale(): Language {
 /** Look up a UI string in the active language, falling back to English. */
 export function t(key: StringKey, lang: Language = current): string {
   return STRINGS[lang][key] ?? STRINGS.en[key];
+}
+
+/** Every key of one language's table (for the parity test). */
+export function stringKeys(lang: Language): string[] {
+  return Object.keys(STRINGS[lang]);
+}
+
+/** Translate `key` if it is in the table, else return it unchanged (e.g. a raw option value). */
+export function tOr(key: string, lang: Language = current): string {
+  const from = (table: Record<string, string>): string | undefined => (Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined);
+  return from(STRINGS[lang]) ?? from(STRINGS.en) ?? key;
 }
 
 export function kindLabel(kind: Kind, lang: Language = current): string {

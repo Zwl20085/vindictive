@@ -1,11 +1,14 @@
 import type { Dock, Language, Settings, Theme } from '../types';
-import { isLanguage, LOCALES, t, type StringKey } from '../lib/i18n';
+import { isLanguage, LOCALES, t, tOr } from '../lib/i18n';
 import { clampColumns, MAX_COLUMNS, MIN_COLUMNS } from './board';
 import { el } from './dom';
+import { errorMessage } from './errors';
 
 export const MAX_WEATHER_LOCATION_CHARS = 80;
 export const MIN_WINDOW_OPACITY = 20;
 export const MAX_WINDOW_OPACITY = 100;
+/** Matches the Rust default in settings.rs. */
+export const DEFAULT_WINDOW_OPACITY = 50;
 
 export interface SettingsActions {
   onSave: (settings: Settings) => Promise<void>;
@@ -33,10 +36,10 @@ function text(name: keyof Settings, value: string, type = 'text', extra: Record<
   return el('input', { type, name, value, autocomplete: 'off', spellcheck: 'false', ...extra });
 }
 
-/** Select whose option labels are translated through the string table. */
+/** Select whose option labels are translated through the string table (raw value if untranslated). */
 function select(name: keyof Settings, value: string, options: readonly string[]): HTMLSelectElement {
   const sel = el('select', { name });
-  for (const o of options) sel.append(el('option', { value: o, selected: o === value, text: t(o as StringKey) }));
+  for (const o of options) sel.append(el('option', { value: o, selected: o === value, text: tOr(o) }));
   return sel;
 }
 
@@ -45,10 +48,44 @@ function check(name: keyof Settings, value: boolean, label: string): HTMLElement
   return el('label', { className: 'set-check' }, input, label);
 }
 
-/** `Ctrl+Shift+K` and ` ctrl + shift+k ` are the same shortcut. */
-function sameShortcut(a: string, b: string): boolean {
-  const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, '');
-  return norm(a) === norm(b);
+/** Spellings of one modifier, folded to a single name. */
+const MODIFIER_ALIASES = new Map<string, string>(Object.entries({
+  ctrl: 'ctrl',
+  control: 'ctrl',
+  shift: 'shift',
+  alt: 'alt',
+  option: 'alt',
+  super: 'super',
+  meta: 'super',
+  win: 'super',
+  cmd: 'super',
+  command: 'super',
+  cmdorctrl: 'cmdorctrl',
+  commandorcontrol: 'cmdorctrl',
+}));
+
+/**
+ * Canonical form of a shortcut: lower case, modifiers deduplicated and sorted,
+ * key last. `Ctrl+Shift+K`, ` shift + ctrl+k ` and `Control+Shift+K` agree.
+ */
+export function normaliseShortcut(shortcut: string): string {
+  const tokens = shortcut
+    .split('+')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+  const modifiers = new Set<string>();
+  const keys: string[] = [];
+  for (const token of tokens) {
+    const modifier = MODIFIER_ALIASES.get(token);
+    if (modifier) modifiers.add(modifier);
+    else keys.push(token);
+  }
+  return [...[...modifiers].sort(), ...keys].join('+');
+}
+
+/** Whether two shortcut strings name the same key combination. */
+export function sameShortcut(a: string, b: string): boolean {
+  return normaliseShortcut(a) === normaliseShortcut(b);
 }
 
 /** Read the form back into a new Settings object, validated. */
@@ -61,10 +98,11 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   const language = str('language');
   const folder = str('folder');
   if (!folder) throw new Error(t('folderRequired'));
-  if (!DOCKS.includes(dock)) throw new Error('invalid dock');
-  if (!THEMES.includes(theme)) throw new Error('invalid theme');
-  if (!isLanguage(language)) throw new Error('invalid language');
-  const hotkey = str('hotkey') || base.hotkey;
+  if (!DOCKS.includes(dock)) throw new Error(`${t('invalidDock')}: ${dock}`);
+  if (!THEMES.includes(theme)) throw new Error(`${t('invalidTheme')}: ${theme}`);
+  if (!isLanguage(language)) throw new Error(`${t('invalidLanguage')}: ${language}`);
+  const hotkey = str('hotkey');
+  if (!hotkey) throw new Error(t('hotkeyRequired'));
   const boardHotkey = str('board_hotkey');
   if (boardHotkey && sameShortcut(boardHotkey, hotkey)) throw new Error(t('hotkeysClash'));
   const alwaysOnTop = bool('always_on_top');
@@ -83,7 +121,7 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
     weather_location: str('weather_location').slice(0, MAX_WEATHER_LOCATION_CHARS),
     editor_command: str('editor_command'),
     fit_height: bool('fit_height'),
-    window_opacity: Math.min(MAX_WINDOW_OPACITY, Math.max(MIN_WINDOW_OPACITY, Math.round(Number(str('window_opacity')) || MAX_WINDOW_OPACITY))),
+    window_opacity: Math.min(MAX_WINDOW_OPACITY, Math.max(MIN_WINDOW_OPACITY, Math.round(Number(str('window_opacity')) || DEFAULT_WINDOW_OPACITY))),
     show_panel: bool('show_panel'),
     always_on_top: alwaysOnTop,
     always_on_bottom: alwaysOnBottom,
@@ -99,7 +137,7 @@ function folderSection(value: string, actions: SettingsActions, status: HTMLElem
   const browse = el('button', { type: 'button', className: 'action', text: `${t('browse')}…` });
   const open = el('button', { type: 'button', className: 'action', text: t('openFolder') });
   const report = (error: unknown): void => {
-    status.textContent = error instanceof Error ? error.message : String(error);
+    status.textContent = errorMessage(error);
     status.dataset.state = 'error';
   };
   browse.addEventListener('click', () => {
@@ -186,7 +224,7 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
         status.textContent = t('saved');
         status.dataset.state = 'ok';
       } catch (error) {
-        status.textContent = error instanceof Error ? error.message : String(error);
+        status.textContent = errorMessage(error);
         status.dataset.state = 'error';
       }
     })();

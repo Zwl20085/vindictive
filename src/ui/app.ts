@@ -2,19 +2,19 @@ import { call, isTauri, onBoardUpdated, openExternal } from '../api';
 import type { TileSize } from '../lib/tileSize';
 import type { BoardState, Dock, Settings, Tip, TipEdit } from '../types';
 import { setLocale, t } from '../lib/i18n';
-import { devClawdMood } from '../mock/sample-tips';
+import { devClawdMood } from '../lib/mood';
 import { renderAddBar } from './addbar';
 import { showMenu } from './menu';
-import { fitTitles, handleBoardKeys, renderBoard } from './board';
+import { createBoard, fitTitles, handleBoardKeys, updateBoard } from './board';
 import { renderChrome } from './chrome';
-import { renderDetail } from './detail';
+import { refreshDetail, renderDetail } from './detail';
 import { el, mount } from './dom';
 import { renderEditForm } from './edit-form';
 import { errorLine, guard, showError, showNotice } from './errors';
-import { cachedResolver } from './images';
+import { cachedResolver, pruneImageCache } from './images';
 import { closeLightbox, isLightboxOpen } from './lightbox';
 import { Panel } from './panel';
-import { renderSettings } from './settings';
+import { DEFAULT_WINDOW_OPACITY, renderSettings } from './settings';
 import { Store, type UiState } from './store';
 import { tileMenuItems } from './tile-menu';
 
@@ -37,6 +37,15 @@ export class App {
   private readonly seen = new Set<string>();
   private readonly resolveImage = cachedResolver((path) => call('fetch_image', { path }));
   private weatherFor = '';
+  /**
+   * What the back face currently holds (`settings`, `edit:<id>`,
+   * `detail:<id>:<sha>:<next>:<lang>`), or '' once the view returned to the
+   * board. The back face keeps its content while flipping away, so the DOM
+   * alone cannot tell a fresh open from a re-render.
+   */
+  private backKey = '';
+  /** Tip object behind the shown detail, for tips without a `sha`. */
+  private backTip: Tip | undefined;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -74,11 +83,12 @@ export class App {
 
   private applyBoard(board: BoardState): void {
     document.documentElement.dataset.theme = board.settings.theme;
-    document.documentElement.style.setProperty('--alpha', String(Math.min(100, Math.max(20, board.settings.window_opacity || 100)) / 100));
+    document.documentElement.style.setProperty('--alpha', String(Math.min(100, Math.max(20, board.settings.window_opacity || DEFAULT_WINDOW_OPACITY)) / 100));
     setLocale(board.settings.language);
     const view = this.store.get().view;
     const stillExists = !('id' in view) || board.tips.some((t) => t.id === view.id);
     this.store.set({ board, sync: board.sync_error ? 'error' : 'ok', view: stillExists ? view : { kind: 'board' } });
+    pruneImageCache(new Set(board.tips.map((tip) => tip.sha).filter((sha): sha is string => !!sha)));
     void this.loadWeather(false);
   }
 
@@ -134,9 +144,12 @@ export class App {
     else this.store.set({ sync: 'error' });
   }
 
-  private async mutate(action: () => Promise<BoardState>, context: string): Promise<void> {
+  /** Run a backend mutation; errors are shown by `guard`. True on success. */
+  private async mutate(action: () => Promise<BoardState>, context: string): Promise<boolean> {
     const board = await guard(context, action);
-    if (board) this.applyBoard(board);
+    if (!board) return false;
+    this.applyBoard(board);
+    return true;
   }
 
   private onKey(event: KeyboardEvent): void {
@@ -183,25 +196,58 @@ export class App {
   private renderFaces(state: UiState): void {
     if (!state.board) return;
     const now = new Date();
-    mount(
-      this.front,
-      state.adding ? renderAddBar(this.addBarActions()) : null,
-      renderBoard({
-        state: state.board,
-        now,
-        seen: this.seen,
-        resolveImage: this.resolveImage,
-        onOpen: (id) => this.store.set({ view: { kind: 'detail', id } }),
-        onMenu: (id, x, y) => this.tileMenu(id, x, y),
-        onAdd: () => this.store.set({ adding: true }),
-        onSetup: () => this.store.set({ view: { kind: 'settings' } }),
-        onReorder: (id, order) => void this.mutate(() => call('set_order', { id, order }), 'set_order'),
-      }),
-    );
-    fitTitles(this.front);
+    const onBoard = state.view.kind === 'board';
+    // The face turned away must not be reachable by Tab or screen readers.
+    this.front.toggleAttribute('inert', !onBoard);
+    this.back.toggleAttribute('inert', onBoard);
+    this.renderFront(state, now);
     this.renderBack(state, now);
-    this.stage.classList.toggle('open', state.view.kind !== 'board');
+    this.stage.classList.toggle('open', !onBoard);
     this.fitWindow();
+  }
+
+  /**
+   * Front face: add bar (if open) above the board grid. Both nodes are kept
+   * across renders: the add bar so the tick does not wipe what is being
+   * typed, the grid so `updateBoard` can reuse unchanged tiles.
+   */
+  private renderFront(state: UiState, now: Date): void {
+    const board = state.board;
+    if (!board) return;
+    const active = document.activeElement;
+    const focusedId = active instanceof HTMLElement && this.front.contains(active) ? active.closest<HTMLElement>('.tile[data-id]')?.dataset.id : undefined;
+
+    let bar = this.front.querySelector<HTMLElement>(':scope > .addbar');
+    if (!state.adding) bar = null;
+    else if (!bar) bar = renderAddBar(this.addBarActions());
+    const grid = this.front.querySelector<HTMLElement>(':scope > .board') ?? createBoard();
+    const built = updateBoard(grid, {
+      state: board,
+      now,
+      seen: this.seen,
+      resolveImage: this.resolveImage,
+      onOpen: (id) => this.store.set({ view: { kind: 'detail', id } }),
+      onMenu: (id, x, y) => this.tileMenu(id, x, y),
+      onAdd: () => this.store.set({ adding: true }),
+      onSetup: () => this.store.set({ view: { kind: 'settings' } }),
+      onReorder: (id, order) => void this.mutate(() => call('set_order', { id, order }), 'set_order'),
+    });
+    const wanted = bar ? [bar, grid] : [grid];
+    for (const child of Array.from(this.front.children)) {
+      if (!wanted.includes(child as HTMLElement)) child.remove();
+    }
+    wanted.forEach((node, index) => {
+      if (this.front.children[index] !== node) this.front.insertBefore(node, this.front.children[index] ?? null);
+    });
+    built.forEach((tile) => fitTitles(tile));
+    // A replaced or moved tile loses focus; put it back on the same tip.
+    if (focusedId && !this.front.contains(document.activeElement)) this.focusTile(focusedId);
+  }
+
+  /** Focus the board tile for `id`, if it is shown. */
+  private focusTile(id: string): void {
+    const tile = Array.from(this.front.querySelectorAll<HTMLElement>('.tile[data-id]')).find((t) => t.dataset.id === id);
+    tile?.focus();
   }
 
   private fitTimer: ReturnType<typeof setTimeout> | undefined;
@@ -234,20 +280,53 @@ export class App {
   private renderBack(state: UiState, now: Date): void {
     const board = state.board;
     if (!board) return;
-    if (state.view.kind === 'settings') {
+    const view = state.view;
+    if (view.kind === 'board') {
+      // Leave the content in place for the flip back; the next open re-renders.
+      this.backKey = '';
+      this.backTip = undefined;
+      return;
+    }
+    if (view.kind === 'settings') {
+      // Mounted once per opening (fresh settings then), so the tick and
+      // board updates never wipe a half-typed form. A language switch
+      // re-renders it so the labels follow.
+      const key = `settings:${board.settings.language}`;
+      if (this.backKey === key && this.back.querySelector('.settings')) return;
+      this.backKey = key;
       mount(this.back, renderSettings({ settings: board.settings, actions: this.settingsActions() }));
       return;
     }
-    if (state.view.kind === 'edit') {
-      this.renderEdit(board, state.view.id);
+    if (view.kind === 'edit') {
+      this.renderEdit(board, view.id);
       return;
     }
-    if (state.view.kind === 'detail') {
-      const id = state.view.id;
-      const tip = board.tips.find((t) => t.id === id);
-      if (tip) mount(this.back, renderDetail({ tip, settings: board.settings, now, actions: this.detailActions(), isNextUp: tip.id === board.next_up }));
+    const tip = board.tips.find((t) => t.id === view.id);
+    if (!tip) return;
+    this.renderDetailFace(tip, board, now);
+  }
+
+  /**
+   * The detail panel is rebuilt only when its tip changed (new `sha`, or a
+   * new object for tips without one), next-up moved, or the language
+   * changed. Otherwise only its countdown is refreshed, so scroll position,
+   * an armed delete and running animations survive board updates.
+   */
+  private renderDetailFace(tip: Tip, board: BoardState, now: Date): void {
+    const isNextUp = tip.id === board.next_up;
+    const key = `detail:${tip.id}:${tip.sha ?? ''}:${isNextUp}:${board.settings.language}`;
+    const mounted = this.back.querySelector<HTMLElement>(':scope > .detail');
+    const sameTip = tip.sha ? mounted?.dataset.sha === tip.sha : this.backTip === tip;
+    if (mounted && this.backKey === key && sameTip) {
+      refreshDetail(mounted, tip, now);
       return;
     }
+    const opening = !this.backKey.startsWith(`detail:${tip.id}:`);
+    this.backKey = key;
+    this.backTip = tip;
+    const panel = renderDetail({ tip, settings: board.settings, now, actions: this.detailActions(), isNextUp });
+    mount(this.back, panel);
+    if (opening) panel.focus({ preventScroll: true });
   }
 
   /**
@@ -257,9 +336,12 @@ export class App {
    */
   private renderEdit(board: BoardState, id: string): void {
     const mounted = this.back.querySelector<HTMLElement>('.edit-form');
-    if (mounted?.dataset.editing === id) return;
+    if (mounted?.dataset.editing === id && this.backKey === `edit:${id}`) return;
     const tip = board.tips.find((t) => t.id === id);
-    if (tip) mount(this.back, renderEditForm({ tip, actions: this.editActions(tip) }));
+    if (!tip) return;
+    this.backKey = `edit:${id}`;
+    this.backTip = undefined;
+    mount(this.back, renderEditForm({ tip, actions: this.editActions(tip) }));
   }
 
   private editActions(tip: Tip) {
@@ -282,9 +364,27 @@ export class App {
     };
   }
 
+  /**
+   * After Done / Snooze / Delete: flip back on success. On failure (the error
+   * is already shown) rebuild the detail, whose actions were disabled for the
+   * leaving animation.
+   */
+  private afterLeave(ok: boolean): void {
+    if (ok) {
+      this.back_();
+      return;
+    }
+    this.backKey = '';
+    this.renderFaces(this.store.get());
+  }
+
   private back_(): void {
     closeLightbox();
+    const view = this.store.get().view;
+    const id = 'id' in view ? view.id : undefined;
     this.store.set({ view: { kind: 'board' } });
+    // Return keyboard focus to the tile the detail was opened from.
+    if (id) this.focusTile(id);
   }
 
   private addBarActions() {
@@ -323,10 +423,10 @@ export class App {
 
   private detailActions() {
     return {
-      onDone: (id: string) => void this.mutate(() => call('mark_done', { id }), 'mark_done').then(() => this.back_()),
+      onDone: (id: string) => void this.mutate(() => call('mark_done', { id }), 'mark_done').then((ok) => this.afterLeave(ok)),
       onReopen: (id: string) => void this.mutate(() => call('reopen', { id }), 'reopen'),
-      onSnooze: (id: string, minutes: number) => void this.mutate(() => call('snooze', { id, minutes }), 'snooze').then(() => this.back_()),
-      onDelete: (id: string) => void this.mutate(() => call('delete_tip', { id }), 'delete_tip').then(() => this.back_()),
+      onSnooze: (id: string, minutes: number) => void this.mutate(() => call('snooze', { id, minutes }), 'snooze').then((ok) => this.afterLeave(ok)),
+      onDelete: (id: string) => void this.mutate(() => call('delete_tip', { id }), 'delete_tip').then((ok) => this.afterLeave(ok)),
       onSetColor: (id: string, color: string | null) => void this.mutate(() => call('set_color', { id, color }), 'set_color'),
       onSetSize: (id: string, size: TileSize | null) => void this.mutate(() => call('set_size', { id, size }), 'set_size'),
       onEdit: (id: string) => this.store.set({ view: { kind: 'edit', id } }),

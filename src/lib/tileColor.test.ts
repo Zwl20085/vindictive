@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Tip } from '../types';
 import {
+  contrastRatio,
   DARK_FG,
   DEADLINE_COLORS,
   DONE_COLOR,
@@ -70,8 +71,37 @@ describe('colour helpers', () => {
     expect(luminance('#000000')).toBeCloseTo(0);
     expect(luminance('#fff')).toBeCloseTo(1);
     expect(foregroundFor('#FFC40D')).toBe(DARK_FG);
-    expect(foregroundFor('#2D89EF')).toBe(LIGHT_FG);
+    // Mid blue: 4.9:1 with dark text against 3.1:1 with light, so dark text now (was light under the 0.5 luminance cut).
+    expect(foregroundFor('#2D89EF')).toBe(DARK_FG);
     expect(foregroundFor(KIND_COLORS.reading)).toBe(LIGHT_FG);
     expect(foregroundFor('nope')).toBe(LIGHT_FG);
+  });
+});
+
+describe('text contrast', () => {
+  it('computes WCAG contrast ratios', () => {
+    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21);
+    expect(contrastRatio('#ffffff', '#000000')).toBeCloseTo(21);
+    expect(contrastRatio('#777777', '#777777')).toBeCloseTo(1);
+  });
+  it('puts dark text on the amber deadline colour', () => {
+    const amber = DEADLINE_COLORS.soon;
+    expect(amber).toBe('#A87B1F');
+    expect(contrastRatio(amber, LIGHT_FG)).toBeLessThan(4.5);
+    expect(contrastRatio(amber, DARK_FG)).toBeGreaterThan(4.5);
+    expect(foregroundFor(amber)).toBe(DARK_FG);
+    expect(tileColor(tip({ kind: 'deadline', due_at: '2026-10-05T00:00:00' }), now).fg).toBe(DARK_FG);
+  });
+  it('keeps light text on every other palette colour', () => {
+    for (const bg of [...Object.values(KIND_COLORS), DEADLINE_COLORS.later, DEADLINE_COLORS.critical, OVERDUE_COLOR, DONE_COLOR]) {
+      expect(foregroundFor(bg), bg).toBe(LIGHT_FG);
+    }
+  });
+  it('always picks the higher-contrast option', () => {
+    for (const bg of ['#FF0097', '#2D89EF', '#FFC40D', '#00A300', '#603CBA', '#888', '#fff', '#000']) {
+      const fg = foregroundFor(bg);
+      const other = fg === DARK_FG ? LIGHT_FG : DARK_FG;
+      expect(contrastRatio(bg, fg), bg).toBeGreaterThanOrEqual(contrastRatio(bg, other));
+    }
   });
 });

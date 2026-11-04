@@ -7,12 +7,17 @@ import type { Kind, Priority, Tip, TipEdit } from '../types';
 import { kindLabel, t, type StringKey } from '../lib/i18n';
 import { parseNaive } from '../lib/time';
 import { el } from './dom';
+import { errorMessage } from './errors';
 
 /** Same limits as `src-tauri/src/core/edit.rs`. */
 export const MAX_TITLE_CHARS = 200;
 export const MAX_LOCATION_CHARS = 200;
 export const MAX_BODY_CHARS = 100_000;
 const BODY_ROWS = 10;
+/** A second Esc within this long discards unsaved changes. */
+export const DISCARD_CONFIRM_MS = 2000;
+/** A clock time inside a due string: `09:30`, `9:30`, `T23:59`, `09:30:00`. */
+const DUE_TIME_RE = /(?:^|[\sT])\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?\s*$/i;
 
 const KINDS: readonly Kind[] = ['task', 'deadline', 'note', 'reading', 'event'];
 const PRIORITIES: readonly Priority[] = ['low', 'normal', 'high'];
@@ -36,7 +41,7 @@ export function dueFields(tip: Tip): { date: string; time: string } {
   if (!due) return { date: '', time: '' };
   const date = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`;
   // Without the raw string, keep the resolved time rather than drop it.
-  const hasTime = tip.due === undefined || tip.due.includes(':');
+  const hasTime = tip.due === undefined || DUE_TIME_RE.test(tip.due.trim());
   return { date, time: hasTime ? `${pad(due.getHours())}:${pad(due.getMinutes())}` : '' };
 }
 
@@ -136,8 +141,35 @@ export function renderEditForm(options: EditFormOptions): HTMLFormElement {
     el('div', { className: 'set-row set-actions' }, save, cancel),
   );
   const report = (error: unknown): void => {
-    status.textContent = error instanceof Error ? error.message : String(error);
+    status.textContent = errorMessage(error);
     status.dataset.state = 'error';
+  };
+  // Everything a cancel would throw away, compared against what the form opened with.
+  const snapshot = (): string => JSON.stringify(Array.from(new FormData(form).entries(), ([k, v]) => [k, String(v)]));
+  const original = snapshot();
+  let armedUntil = 0;
+  let armTimer: ReturnType<typeof setTimeout> | undefined;
+  const disarm = (): void => {
+    armedUntil = 0;
+    if (armTimer) clearTimeout(armTimer);
+    armTimer = undefined;
+    if (status.dataset.state === 'confirm') {
+      status.textContent = '';
+      status.dataset.state = '';
+    }
+  };
+  /** Esc: leave at once when nothing changed, else only on a second Esc within the window. */
+  const escape = (): void => {
+    if (snapshot() === original || Date.now() < armedUntil) {
+      disarm();
+      actions.onCancel();
+      return;
+    }
+    armedUntil = Date.now() + DISCARD_CONFIRM_MS;
+    status.textContent = t('discardHint');
+    status.dataset.state = 'confirm';
+    if (armTimer) clearTimeout(armTimer);
+    armTimer = setTimeout(disarm, DISCARD_CONFIRM_MS);
   };
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -157,12 +189,18 @@ export function renderEditForm(options: EditFormOptions): HTMLFormElement {
   form.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      actions.onCancel();
+      // The form owns Esc: the board's own Esc handler must not close the detail underneath.
+      event.stopPropagation();
+      escape();
     } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       form.requestSubmit();
     }
   });
-  cancel.addEventListener('click', actions.onCancel);
+  // The Cancel button is a deliberate click, so it discards without asking.
+  cancel.addEventListener('click', () => {
+    disarm();
+    actions.onCancel();
+  });
   return form;
 }

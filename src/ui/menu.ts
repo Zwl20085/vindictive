@@ -7,12 +7,18 @@ export interface MenuItem {
 }
 
 let openMenu: HTMLElement | undefined;
+/** Where focus goes back to when the open menu closes. */
+let returnTo: HTMLElement | undefined;
 
 export function closeMenu(): void {
+  const wasOpen = !!openMenu;
   openMenu?.remove();
   openMenu = undefined;
   document.removeEventListener('pointerdown', onOutside, true);
   document.removeEventListener('keydown', onKey, true);
+  const target = returnTo;
+  returnTo = undefined;
+  if (wasOpen && target?.isConnected) target.focus();
 }
 
 function onOutside(event: Event): void {
@@ -20,7 +26,11 @@ function onOutside(event: Event): void {
 }
 
 function onKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape') closeMenu();
+  if (event.key !== 'Escape') return;
+  // Swallow the key: a menu over the detail view must not also close the detail.
+  event.stopPropagation();
+  event.preventDefault();
+  closeMenu();
 }
 
 export interface SwatchMenuOptions {
@@ -32,10 +42,14 @@ export interface SwatchMenuOptions {
   customLabel: string;
   /** `null` clears the override. */
   onPick: (color: string | null) => void;
+  /** Focus returns here on close; defaults to whatever had focus at open. */
+  returnFocus?: HTMLElement;
 }
 
 /** Put `menu` at `x, y`, clamped inside the viewport, and make it the open one. */
-function open(menu: HTMLElement, x: number, y: number): HTMLElement {
+function open(menu: HTMLElement, x: number, y: number, returnFocus?: HTMLElement): HTMLElement {
+  const active = document.activeElement;
+  const opener = returnFocus ?? (active instanceof HTMLElement && active !== document.body ? active : undefined);
   document.body.append(menu);
   const rect = menu.getBoundingClientRect();
   const left = Math.max(0, Math.min(x, window.innerWidth - rect.width));
@@ -43,6 +57,7 @@ function open(menu: HTMLElement, x: number, y: number): HTMLElement {
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
   openMenu = menu;
+  returnTo = opener;
   document.addEventListener('pointerdown', onOutside, true);
   document.addEventListener('keydown', onKey, true);
   (menu.querySelector<HTMLElement>('[tabindex="0"], button, input') ?? null)?.focus();
@@ -68,11 +83,41 @@ export function showSwatchMenu(x: number, y: number, options: SwatchMenuOptions)
   const custom = el('input', { type: 'color', className: 'swatch swatch-custom menu-swatch', title: options.customLabel, 'aria-label': options.customLabel, value: current ?? '#4a3b6b' });
   custom.addEventListener('change', () => pick(custom.value));
   const menu = el('div', { className: 'menu menu-swatches', role: 'dialog', 'aria-label': options.customLabel }, auto, el('div', { className: 'menu-swatch-grid' }, ...swatches, custom));
-  return open(menu, x, y);
+  return open(menu, x, y, options.returnFocus);
 }
 
-/** Show a flat context menu at `x, y`, clamped inside the viewport. */
-export function showMenu(x: number, y: number, items: MenuItem[]): HTMLElement {
+/** Arrow keys, Home and End move focus between the menu's items (wrapping). */
+function roveFocus(menu: HTMLElement, event: KeyboardEvent): boolean {
+  const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+  if (!items.length) return false;
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  let next: number;
+  switch (event.key) {
+    case 'ArrowDown':
+      next = at < 0 ? 0 : (at + 1) % items.length;
+      break;
+    case 'ArrowUp':
+      next = at < 0 ? items.length - 1 : (at - 1 + items.length) % items.length;
+      break;
+    case 'Home':
+      next = 0;
+      break;
+    case 'End':
+      next = items.length - 1;
+      break;
+    default:
+      return false;
+  }
+  event.preventDefault();
+  items[next]?.focus();
+  return true;
+}
+
+/**
+ * Show a flat context menu at `x, y`, clamped inside the viewport. Focus
+ * returns to `returnFocus` (or whatever had focus at open) when it closes.
+ */
+export function showMenu(x: number, y: number, items: MenuItem[], returnFocus?: HTMLElement): HTMLElement {
   closeMenu();
   const menu = el('ul', { className: 'menu', role: 'menu' });
   for (const item of items) {
@@ -83,9 +128,13 @@ export function showMenu(x: number, y: number, items: MenuItem[]): HTMLElement {
     };
     li.addEventListener('click', select);
     li.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') select();
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        select();
+      }
     });
     menu.append(li);
   }
-  return open(menu, x, y);
+  menu.addEventListener('keydown', (e) => void roveFocus(menu, e));
+  return open(menu, x, y, returnFocus);
 }

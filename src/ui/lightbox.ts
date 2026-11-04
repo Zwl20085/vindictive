@@ -1,6 +1,10 @@
 /** Full-window figure viewer. One at a time; Esc, click or Back closes it. */
 import { t } from '../lib/i18n';
 import { el } from './dom';
+import { reducedMotion } from './motion';
+
+/** Length of the fade-out in `board.css` (`.lightbox-closing`). */
+export const LIGHTBOX_CLOSE_MS = 160;
 
 let open: HTMLElement | undefined;
 
@@ -9,8 +13,12 @@ export function closeLightbox(): void {
   const node = open;
   open = undefined;
   document.removeEventListener('keydown', onKey, true);
+  if (reducedMotion()) {
+    node.remove();
+    return;
+  }
   node.classList.add('lightbox-closing');
-  setTimeout(() => node.remove(), 160);
+  setTimeout(() => node.remove(), LIGHTBOX_CLOSE_MS);
 }
 
 function onKey(event: KeyboardEvent): void {

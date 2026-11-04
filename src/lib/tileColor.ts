@@ -32,9 +32,6 @@ export const DONE_COLOR = '#26272B';
 export const LIGHT_FG = '#F2EFE9';
 export const DARK_FG = '#1A1A1A';
 
-/** Relative luminance threshold above which we use dark text. */
-const DARK_TEXT_LUMINANCE = 0.5;
-
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 export function isHexColor(value: string | undefined): value is string {
@@ -60,8 +57,21 @@ export function luminance(hex: string): number {
   return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
 }
 
+/** WCAG 2 contrast ratio between two hex colours, 1..21. */
+export function contrastRatio(a: string, b: string): number {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/**
+ * Text colour for a tile background: whichever of the light and dark text
+ * colours has the higher WCAG contrast against it (light wins a tie). A
+ * non-hex value gets light text.
+ */
 export function foregroundFor(bg: string): string {
-  return isHexColor(bg) && luminance(bg) > DARK_TEXT_LUMINANCE ? DARK_FG : LIGHT_FG;
+  if (!isHexColor(bg)) return LIGHT_FG;
+  return contrastRatio(bg, DARK_FG) > contrastRatio(bg, LIGHT_FG) ? DARK_FG : LIGHT_FG;
 }
 
 /** Decide the tile colour for a tip at `now`. */

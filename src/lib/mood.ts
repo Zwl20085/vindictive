@@ -38,6 +38,16 @@ export function isClawdMood(value: unknown): value is ClawdMood {
   return typeof value === 'string' && (CLAWD_MOODS as readonly string[]).includes(value);
 }
 
+/**
+ * `?clawd=celebrating` (or any other mood) on the dev URL holds Clawd in that
+ * mood, for screenshots. Lives here rather than in the mock so the app does
+ * not pull the sample data into the production bundle.
+ */
+export function devClawdMood(search: string = typeof location !== 'undefined' ? location.search : ''): ClawdMood | undefined {
+  const mood = new URLSearchParams(search).get('clawd');
+  return isClawdMood(mood) ? mood : undefined;
+}
+
 /** True during Clawd's night-time nap. */
 export function isSleepTime(now: Date): boolean {
   const h = now.getHours();

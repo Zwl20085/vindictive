@@ -4,7 +4,7 @@
  * developed and screenshotted without the Rust side.
  */
 import type { BoardState, Commands, Events } from './types';
-import { mockInvoke, mockListen } from './mock/backend';
+import { errorMessage } from './ui/errors';
 
 type CommandName = keyof Commands;
 type ArgsOf<K extends CommandName> = Parameters<Commands[K]>[0];
@@ -24,6 +24,14 @@ async function tauriInvoke<K extends CommandName>(cmd: K, args?: ArgsOf<K>): Pro
   return invoke<ResultOf<K>>(cmd, args as Record<string, unknown> | undefined);
 }
 
+/**
+ * The browser mock, loaded only outside Tauri so it (and its sample tips)
+ * stays out of the code that runs in the app.
+ */
+function mock(): Promise<typeof import('./mock/backend')> {
+  return import('./mock/backend');
+}
+
 async function tauriListen<E extends keyof Events>(event: E, cb: Listener<Events[E]>): Promise<UnlistenFn> {
   const { listen } = await import('@tauri-apps/api/event');
   return listen<Events[E]>(event, (e) => cb(e.payload));
@@ -32,9 +40,9 @@ async function tauriListen<E extends keyof Events>(event: E, cb: Listener<Events
 /** Call a backend command. Errors are rethrown as `Error` with context. */
 export async function call<K extends CommandName>(cmd: K, args?: ArgsOf<K>): Promise<ResultOf<K>> {
   try {
-    return isTauri() ? await tauriInvoke(cmd, args) : await mockInvoke(cmd, args);
+    return isTauri() ? await tauriInvoke(cmd, args) : await (await mock()).mockInvoke(cmd, args);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     console.error(`Vindictive: command "${cmd}" failed`, args, error);
     throw new Error(`${cmd}: ${message}`);
   }
@@ -42,7 +50,8 @@ export async function call<K extends CommandName>(cmd: K, args?: ArgsOf<K>): Pro
 
 /** Subscribe to a backend event. Resolves to an unlisten function. */
 export async function on<E extends keyof Events>(event: E, cb: Listener<Events[E]>): Promise<UnlistenFn> {
-  return isTauri() ? tauriListen(event, cb) : mockListen(event, cb);
+  if (isTauri()) return tauriListen(event, cb);
+  return (await mock()).mockListen(event, cb);
 }
 
 export function onBoardUpdated(cb: Listener<BoardState>): Promise<UnlistenFn> {

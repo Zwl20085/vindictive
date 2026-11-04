@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SAMPLE_SETTINGS } from '../mock/sample-tips';
-import { readSettings, renderSettings, type SettingsActions } from './settings';
+import { normaliseShortcut, readSettings, renderSettings, sameShortcut, type SettingsActions } from './settings';
 
 const actions: SettingsActions = {
   onSave: vi.fn(async () => undefined),
@@ -94,5 +94,50 @@ describe('hotkeys and updates', () => {
     if (!peek) throw new Error('missing field');
     peek.value = 'ctrl+shift+SPACE';
     expect(() => readSettings(form, SAMPLE_SETTINGS)).toThrow(/different/);
+    // Modifier order and spelling do not make it a different shortcut.
+    peek.value = ' Shift + Control+space ';
+    expect(() => readSettings(form, SAMPLE_SETTINGS)).toThrow(/different/);
+  });
+
+  it('requires a capture hotkey instead of silently keeping the old one', () => {
+    const { form } = render();
+    const hotkey = form.querySelector<HTMLInputElement>('input[name="hotkey"]');
+    if (!hotkey) throw new Error('missing field');
+    hotkey.value = '   ';
+    expect(() => readSettings(form, SAMPLE_SETTINGS)).toThrow(/capture hotkey/);
+  });
+
+  it('shows the missing-hotkey error inline on save', async () => {
+    const onSave = vi.fn(async () => undefined);
+    const form = renderSettings({ settings: SAMPLE_SETTINGS, actions: { ...actions, onSave } }) as HTMLFormElement;
+    document.body.append(form);
+    const hotkey = form.querySelector<HTMLInputElement>('input[name="hotkey"]');
+    if (!hotkey) throw new Error('missing field');
+    hotkey.value = '';
+    form.requestSubmit();
+    await vi.waitFor(() => expect(form.querySelector('.set-status')?.textContent).toMatch(/capture hotkey/));
+    expect(form.querySelector<HTMLElement>('.set-status')?.dataset.state).toBe('error');
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('shortcut comparison', () => {
+  it('ignores modifier order, case, spacing and modifier spelling', () => {
+    expect(normaliseShortcut('Ctrl+Shift+K')).toBe('ctrl+shift+k');
+    expect(sameShortcut('Ctrl+Shift+K', 'Shift+Ctrl+K')).toBe(true);
+    expect(sameShortcut(' ctrl + shift+k ', 'Ctrl+Shift+K')).toBe(true);
+    expect(sameShortcut('Control+Alt+Space', 'Alt+Ctrl+Space')).toBe(true);
+    expect(sameShortcut('Ctrl+Ctrl+K', 'Ctrl+K')).toBe(true);
+    expect(sameShortcut('Ctrl+Shift+K', 'Ctrl+Shift+J')).toBe(false);
+    expect(sameShortcut('Ctrl+Shift+K', 'Ctrl+K')).toBe(false);
+    expect(sameShortcut('Ctrl+Alt+Shift+Space', 'Ctrl+Shift+Space')).toBe(false);
+  });
+});
+
+describe('select labels', () => {
+  it('translates known option values', () => {
+    const { form } = render();
+    const theme = form.querySelector<HTMLSelectElement>('select[name="theme"]');
+    expect(Array.from(theme?.options ?? [], (o) => o.textContent)).toEqual(['dark', 'light', 'NERV', 'cobalt', 'paper']);
   });
 });

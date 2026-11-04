@@ -3,6 +3,11 @@ import { el } from './dom';
 
 export const ERROR_VISIBLE_MS = 5000;
 
+/** The user-facing text of anything thrown: an Error's message, else its string form. */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 let line: HTMLElement | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -23,7 +28,7 @@ export function showNotice(context: string, message: string): void {
 }
 
 export function showError(context: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   console.error(`Vindictive: ${context}`, error);
   void call('frontend_log', { level: 'error', message: `${context}: ${message}` }).catch(() => undefined);
   const node = errorLine();

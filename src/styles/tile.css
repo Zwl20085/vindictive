@@ -73,6 +73,17 @@
   font-size: 11px;
 }
 
+/* Parse warnings: a plain "!" beside the kind glyph, in the tile's own colour. */
+.tile-warn {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: var(--weight-strong, 600);
+}
+
+.tile-warn + .tile-glyph {
+  margin-left: 0;
+}
+
 /* Titles carry the Evangelion typography. */
 .tile-title {
   position: relative;
@@ -218,5 +229,12 @@
   }
   to {
     transform: none;
+  }
+}
+
+/* tokens.css shortens durations under reduced motion; delays must go too. */
+@media (prefers-reduced-motion: reduce) {
+  .tile-enter {
+    animation-delay: 0s;
   }
 }

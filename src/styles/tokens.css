@@ -79,7 +79,8 @@
   --fg-muted: #7a7168;
   --surface: #fbf8f1;
   --surface-2: #e8e1d3;
-  --edge: #ffffff;
+  /* A white edge disappears on a light ground: focus ring and underlines go dark. */
+  --edge: #1a1a1d;
   --accent: #b0562a;
   --overlay: rgb(245 240 230 / 0.94);
   color-scheme: light;
@@ -91,10 +92,18 @@
   --fg-muted: #6a6966;
   --surface: #ffffff;
   --surface-2: #e2e1dd;
-  --edge: #ffffff;
+  --edge: #1a1a1d;
   --accent: #2b6cc4;
   --overlay: rgb(240 239 236 / 0.94);
   color-scheme: light;
+}
+
+/* Tiles and the detail face keep their own (mostly dark) colour in every theme,
+   so on a light theme their edges (next-up, overdue, focus, chips) follow the
+   tile's text colour instead of the dark ground edge. */
+:root[data-theme='light'] :is(.tile, .detail),
+:root[data-theme='paper'] :is(.tile, .detail) {
+  --edge: var(--tile-fg, #ffffff);
 }
 
 *,
@@ -180,7 +189,8 @@ select:focus-visible {
 }
 
 .action:hover {
-  background: rgb(255 255 255 / 0.08);
+  /* Mixed from the text colour so it shows on light themes too. */
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 .action:active {

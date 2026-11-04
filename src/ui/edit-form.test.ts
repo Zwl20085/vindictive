@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Tip, TipEdit } from '../types';
 import { setLocale } from '../lib/i18n';
-import { dueFields, readEditForm, renderEditForm, splitTags, type EditFormActions } from './edit-form';
+import { DISCARD_CONFIRM_MS, dueFields, readEditForm, renderEditForm, splitTags, type EditFormActions } from './edit-form';
 
 afterEach(() => setLocale('en'));
 
@@ -40,6 +40,16 @@ describe('dueFields', () => {
     expect(dueFields({ ...base, due: '2026-10-15 08:30', due_at: '2026-10-15T08:30:00' })).toEqual({ date: '2026-10-15', time: '08:30' });
     expect(dueFields({ ...base, due: '2026/10/15', due_at: '2026-10-15T23:59:00' })).toEqual({ date: '2026-10-15', time: '' });
     expect(dueFields({ ...base, due: undefined, due_at: undefined })).toEqual({ date: '', time: '' });
+  });
+  it('decides "has a time" from a clock time in the due string, not any colon', () => {
+    const at = (due: string, dueAt: string) => dueFields({ ...base, due, due_at: dueAt });
+    expect(at('2026-10-15T08:30', '2026-10-15T08:30:00')).toEqual({ date: '2026-10-15', time: '08:30' });
+    expect(at('2026-10-15 8:05', '2026-10-15T08:05:00')).toEqual({ date: '2026-10-15', time: '08:05' });
+    expect(at('2026-10-15 08:30:00', '2026-10-15T08:30:00')).toEqual({ date: '2026-10-15', time: '08:30' });
+    expect(at('tomorrow 9:30', '2026-10-15T09:30:00')).toEqual({ date: '2026-10-15', time: '09:30' });
+    // A colon that is not a clock time does not invent one.
+    expect(at('due: 2026-10-15', '2026-10-15T23:59:00')).toEqual({ date: '2026-10-15', time: '' });
+    expect(at('2026-10-15 ', '2026-10-15T23:59:00')).toEqual({ date: '2026-10-15', time: '' });
   });
 });
 
@@ -107,7 +117,63 @@ describe('renderEditForm', () => {
     expect(vi.mocked(onSave).mock.calls[0]?.[0].title).toBe('Renamed');
     field<HTMLTextAreaElement>('body').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
     await vi.waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    // The title was changed, so the first Esc only arms the discard; the second leaves.
+    const esc = (): void => void field<HTMLInputElement>('title').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    esc();
+    expect(onCancel).not.toHaveBeenCalled();
+    esc();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels on a single Esc when nothing changed, without bubbling to the board', () => {
+    const { form, onCancel, field } = setup();
+    const bubble = vi.fn();
+    document.addEventListener('keydown', bubble);
     field<HTMLInputElement>('title').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.removeEventListener('keydown', bubble);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(bubble).not.toHaveBeenCalled();
+    expect(form.querySelector('.set-status')?.textContent).toBe('');
+  });
+
+  it('asks for a second Esc within the window before discarding edits', () => {
+    vi.useFakeTimers();
+    try {
+      const { form, onCancel, field } = setup();
+      const esc = (): void => void field<HTMLTextAreaElement>('body').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      field<HTMLTextAreaElement>('body').value = 'half-typed thought';
+      esc();
+      expect(onCancel).not.toHaveBeenCalled();
+      const status = form.querySelector<HTMLElement>('.set-status');
+      expect(status?.textContent).toMatch(/Esc again/);
+      expect(status?.dataset.state).toBe('confirm');
+      // Too slow: the hint clears and the next Esc only arms again.
+      vi.advanceTimersByTime(DISCARD_CONFIRM_MS + 1);
+      expect(status?.textContent).toBe('');
+      esc();
+      expect(onCancel).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(DISCARD_CONFIRM_MS - 500);
+      esc();
+      expect(onCancel).toHaveBeenCalledTimes(1);
+      expect(field<HTMLTextAreaElement>('body').value).toBe('half-typed thought');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats a change put back to the original as clean', () => {
+    const { onCancel, field } = setup();
+    const title = field<HTMLInputElement>('title');
+    title.value = 'something else';
+    title.value = base.title;
+    title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('the Cancel button discards without asking', () => {
+    const { form, onCancel, field } = setup();
+    field<HTMLInputElement>('title').value = 'changed';
+    form.querySelector<HTMLButtonElement>('.action-back')?.click();
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 

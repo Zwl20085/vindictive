@@ -6,6 +6,7 @@
 import { describeCapture } from '../lib/capture-hint';
 import { t } from '../lib/i18n';
 import { el } from './dom';
+import { errorMessage } from './errors';
 
 export interface AddBarActions {
   onSubmit: (text: string) => Promise<void>;
@@ -33,7 +34,7 @@ export function renderAddBar(actions: AddBarActions): HTMLElement {
     try {
       await actions.onSubmit(text);
     } catch (error) {
-      hint.textContent = error instanceof Error ? error.message : String(error);
+      hint.textContent = errorMessage(error);
       hint.dataset.state = 'error';
     } finally {
       busy = false;

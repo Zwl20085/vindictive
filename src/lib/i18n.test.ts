@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { formatDateTime, formatPanelDate, isLanguage, kindLabel, locale, setLocale, spanUnits, t, weekday } from './i18n';
+import { formatDateTime, formatPanelDate, isLanguage, kindLabel, locale, setLocale, spanUnits, stringKeys, t, tOr, weekday, type StringKey } from './i18n';
 import { countdown, formatLocal, formatSpan, DAY_MS, HOUR_MS } from './time';
 
 afterEach(() => setLocale('en'));
@@ -25,6 +25,27 @@ describe('t', () => {
     expect(t('next', 'en')).toBe('NEXT');
     expect(kindLabel('deadline')).toBe('截止');
     expect(kindLabel('deadline', 'en')).toBe('Deadline');
+  });
+});
+
+describe('string table', () => {
+  it('has the same keys in both languages, none empty', () => {
+    expect(stringKeys('zh').sort()).toEqual(stringKeys('en').sort());
+    for (const lang of ['en', 'zh'] as const) {
+      for (const key of stringKeys(lang)) expect(t(key as StringKey, lang), `${lang}.${key}`).not.toBe('');
+    }
+  });
+  it('translates labels that used to be hard-coded English', () => {
+    expect(t('panelLabel', 'zh')).toBe('时钟与天气');
+    expect(t('invalidTheme', 'zh')).toBe('无效的主题');
+    expect(t('discardHint', 'en')).toMatch(/Esc again/);
+  });
+  it('tOr translates known keys and returns anything else unchanged', () => {
+    expect(tOr('nerv', 'en')).toBe('NERV');
+    expect(tOr('paper', 'zh')).toBe('纸白');
+    expect(tOr('sepia', 'zh')).toBe('sepia');
+    expect(tOr('', 'en')).toBe('');
+    expect(tOr('constructor', 'en')).toBe('constructor');
   });
 });
 

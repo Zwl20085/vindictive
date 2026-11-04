@@ -1,10 +1,10 @@
 import type { BoardState, Tip } from '../types';
 import { t } from '../lib/i18n';
-import type { ImageResolver } from '../lib/markdown';
 import { applyManualOrder, orderForMove } from '../lib/order';
 import { isSnoozed } from '../lib/urgency';
-import { el, mount } from './dom';
-import { renderTile } from './tile';
+import { el } from './dom';
+import type { VersionedResolver } from './images';
+import { renderTile, updateTile } from './tile';
 
 export const MIN_COLUMNS = 2;
 export const MAX_COLUMNS = 6;
@@ -26,7 +26,29 @@ export interface BoardOptions {
    * animation and are added to it; pass nothing to animate every tile.
    */
   seen?: Set<string>;
-  resolveImage?: ImageResolver;
+  resolveImage?: VersionedResolver;
+}
+
+/**
+ * Per-grid state that outlives one render: drag and drop and the keyboard
+ * move read the current ranking from here, so their listeners are attached
+ * once per grid element and never duplicated by later updates.
+ */
+interface GridState {
+  ranked: Tip[];
+  onReorder?: (id: string, order: number) => void;
+  wired: boolean;
+}
+
+const gridStates = new WeakMap<HTMLElement, GridState>();
+
+function gridState(grid: HTMLElement): GridState {
+  let state = gridStates.get(grid);
+  if (!state) {
+    state = { ranked: [], wired: false };
+    gridStates.set(grid, state);
+  }
+  return state;
 }
 
 export function clampColumns(value: number | undefined): number {
@@ -48,7 +70,10 @@ export function visibleTips(state: BoardState, now: Date): Tip[] {
  * hovered tile when the pointer is in its left half, "after" otherwise;
  * dropping on empty grid space moves the tile to the end.
  */
-function wireDragAndDrop(grid: HTMLElement, ranked: readonly Tip[], onReorder: (id: string, order: number) => void): void {
+function wireDragAndDrop(grid: HTMLElement): void {
+  const state = gridState(grid);
+  if (state.wired) return;
+  state.wired = true;
   let dragged: string | undefined;
   const tiles = (): HTMLElement[] => Array.from(grid.querySelectorAll<HTMLElement>('.tile:not(.tile-add)'));
   const clearMarks = (): void => tiles().forEach((t) => t.classList.remove('tile-drop-before', 'tile-drop-after'));
@@ -91,8 +116,8 @@ function wireDragAndDrop(grid: HTMLElement, ranked: readonly Tip[], onReorder: (
     clearMarks();
     grid.querySelector('.tile-dragging')?.classList.remove('tile-dragging');
     dragged = undefined;
-    const order = orderForMove(ranked, id, index);
-    if (order !== undefined) onReorder(id, order);
+    const order = orderForMove(state.ranked, id, index);
+    if (order !== undefined) state.onReorder?.(id, order);
   });
   grid.addEventListener('dragend', () => {
     clearMarks();
@@ -124,32 +149,84 @@ function emptyMessage(state: BoardState, onSetup?: () => void): HTMLElement {
   return el('div', { className: 'board-empty' }, el('p', { text: t('emptyNoFolder') }), button);
 }
 
+/** An empty `.board` grid element, ready for `updateBoard`. */
+export function createBoard(): HTMLElement {
+  return el('div', { className: 'board', role: 'group', 'aria-label': t('boardLabel') });
+}
+
 /** Render the tile grid into a fresh element. */
 export function renderBoard(options: BoardOptions): HTMLElement {
+  const grid = createBoard();
+  updateBoard(grid, options);
+  return grid;
+}
+
+/** Make `grid`'s children exactly `nodes`, in order, moving only what is out of place. */
+function arrange(grid: HTMLElement, nodes: readonly HTMLElement[]): void {
+  const wanted = new Set<Node>(nodes);
+  for (const child of Array.from(grid.children)) {
+    if (!wanted.has(child)) child.remove();
+  }
+  nodes.forEach((node, index) => {
+    const at = grid.children[index];
+    if (at !== node) grid.insertBefore(node, at ?? null);
+  });
+}
+
+/**
+ * Keyed update of an existing grid. A tile whose tip, size, colour and
+ * next-up / overdue state are unchanged keeps its DOM node (only the
+ * countdown text is refreshed), so focus, hover and running animations
+ * survive the 30 s tick. Anything else gets a fresh node. Nodes are moved to
+ * follow the board order. Returns the tiles that were newly built: the only
+ * ones whose titles need fitting.
+ */
+export function updateBoard(grid: HTMLElement, options: BoardOptions): HTMLElement[] {
   const { state, now, onOpen, onMenu, onAdd, onSetup, onReorder, seen, resolveImage } = options;
   const columns = clampColumns(state.settings.columns);
-  const grid = el('div', { className: 'board', role: 'list' });
   grid.style.setProperty('--cols', String(columns));
+  const shared = gridState(grid);
+  const existingAdd = Array.from(grid.children).find((c): c is HTMLButtonElement => c.classList.contains('tile-add'));
+  const plus = (): HTMLButtonElement | null => (onAdd ? existingAdd ?? addTile(onAdd) : null);
 
   const tips = visibleTips(state, now);
   if (tips.length === 0) {
-    mount(grid, emptyMessage(state, onSetup), onAdd && isReady(state) ? addTile(onAdd) : null);
-    return grid;
+    shared.ranked = [];
+    shared.onReorder = onReorder;
+    const add = isReady(state) ? plus() : null;
+    arrange(grid, add ? [emptyMessage(state, onSetup), add] : [emptyMessage(state, onSetup)]);
+    return [];
   }
+
+  const existing = new Map<string, HTMLElement>();
+  for (const child of Array.from(grid.children)) {
+    if (child instanceof HTMLElement && child.classList.contains('tile') && child.dataset.id) existing.set(child.dataset.id, child);
+  }
+  const built: HTMLElement[] = [];
   let entering = 0;
   const tiles = tips.map((tip) => {
+    const isNextUp = tip.id === state.next_up;
+    const kept = existing.get(tip.id);
+    if (kept && updateTile(kept, tip, isNextUp, now, columns)) {
+      seen?.add(tip.id);
+      return kept;
+    }
     const fresh = !seen || !seen.has(tip.id);
     const enterIndex = fresh ? entering++ : undefined;
     seen?.add(tip.id);
-    return renderTile({ tip, isNextUp: tip.id === state.next_up, now, columns, onOpen, onMenu, enterIndex, resolveImage });
+    const tile = renderTile({ tip, isNextUp, now, columns, onOpen, onMenu, enterIndex, resolveImage });
+    built.push(tile);
+    return tile;
   });
-  mount(grid, ...tiles, onAdd ? addTile(onAdd) : null);
-  if (onReorder) {
-    // Keys come from the backend ranking (before manual order is applied).
-    const ranked = state.tips.filter((tip) => tips.some((t) => t.id === tip.id));
-    wireDragAndDrop(grid, ranked, onReorder);
-  }
-  return grid;
+  const add = plus();
+  arrange(grid, add ? [...tiles, add] : tiles);
+
+  // Keys come from the backend ranking (before manual order is applied).
+  const shown = new Set(tips.map((tip) => tip.id));
+  shared.ranked = state.tips.filter((tip) => shown.has(tip.id));
+  shared.onReorder = onReorder;
+  if (onReorder) wireDragAndDrop(grid);
+  return built;
 }
 
 /** Title size tiers, largest first; see `tile.css`. */
@@ -171,18 +248,54 @@ export function fitTitles(grid: ParentNode): void {
   }
 }
 
-/** Arrow-key navigation between tiles. */
+/** Columns the grid is laid out with (`--cols`, set by `updateBoard`). */
+export function gridColumns(grid: HTMLElement): number {
+  return clampColumns(Number.parseInt(grid.style.getPropertyValue('--cols'), 10));
+}
+
+const STEP: Record<string, (cols: number) => number> = {
+  ArrowLeft: () => -1,
+  ArrowRight: () => 1,
+  ArrowUp: (cols) => -cols,
+  ArrowDown: (cols) => cols,
+};
+
+/**
+ * Arrow keys on the board. Left / Right step through the tiles in board
+ * order (the "+" tile included); Up / Down jump by the column count. Both
+ * stop at the ends rather than wrapping. Alt+Arrow on a focused tile moves
+ * the tile itself by the same step and persists it through `onReorder`.
+ */
 export function handleBoardKeys(grid: HTMLElement, event: KeyboardEvent): void {
-  const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'];
-  if (!keys.includes(event.key)) return;
-  const tiles = Array.from(grid.querySelectorAll<HTMLButtonElement>('.tile:not(.tile-add)'));
-  const index = tiles.findIndex((t) => t === document.activeElement);
+  const step = STEP[event.key];
+  if (!step) return;
+  const tiles = Array.from(grid.children).filter((c): c is HTMLButtonElement => c instanceof HTMLButtonElement && c.classList.contains('tile'));
+  const index = tiles.findIndex((tile) => tile === document.activeElement);
+  event.preventDefault();
   if (index < 0) {
     tiles[0]?.focus();
     return;
   }
-  const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
-  const next = tiles[(index + (forward ? 1 : tiles.length - 1)) % tiles.length];
-  next?.focus();
-  event.preventDefault();
+  const delta = step(gridColumns(grid));
+  if (event.altKey) {
+    moveTile(grid, tiles[index], delta);
+    return;
+  }
+  tiles[Math.max(0, Math.min(tiles.length - 1, index + delta))]?.focus();
+}
+
+/** Alt+Arrow: move a tile `delta` places in the displayed order. */
+function moveTile(grid: HTMLElement, tile: HTMLElement | undefined, delta: number): void {
+  const id = tile?.dataset.id;
+  const state = gridStates.get(grid);
+  if (!id || !state?.onReorder) return;
+  const shown = applyManualOrder(state.ranked);
+  const from = shown.findIndex((tip) => tip.id === id);
+  if (from < 0) return;
+  // `orderForMove` takes the index among the *other* tiles, which for a
+  // move to display position `to` is `to` itself.
+  const to = Math.max(0, Math.min(shown.length - 1, from + delta));
+  if (to === from) return;
+  const order = orderForMove(state.ranked, id, to);
+  if (order !== undefined) state.onReorder(id, order);
 }

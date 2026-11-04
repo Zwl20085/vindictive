@@ -85,9 +85,7 @@ export class Clawd {
   constructor() {
     this.sprite.append(drawing(), span('clawd-heart', '♥'), span('clawd-z', 'z'), span('clawd-note', '♪'), ...confetti());
     this.sprite.setAttribute('role', 'img');
-    this.sprite.setAttribute('aria-label', 'Clawd');
     this.sprite.removeAttribute('aria-hidden');
-    this.sprite.title = 'Clawd';
     this.sprite.addEventListener('click', () => this.hop());
     this.walker.append(this.sprite);
     this.element = span('clawd-track');
@@ -147,6 +145,10 @@ export class Clawd {
     const level = worryLevel(mood, counts);
     if (data.level !== level) data.level = level;
     const feeling = clawdFeeling(mood, counts);
-    if (this.sprite.title !== feeling) this.sprite.title = feeling;
+    if (this.sprite.title !== feeling) {
+      this.sprite.title = feeling;
+      // The accessible name says what he feels, in the UI language, like the hover text.
+      this.sprite.setAttribute('aria-label', feeling);
+    }
   }
 }

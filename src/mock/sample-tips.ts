@@ -1,5 +1,4 @@
 import type { Settings, Tip } from '../types';
-import { isClawdMood, type ClawdMood } from '../lib/mood';
 import { DAY_MS, HOUR_MS, toNaive } from '../lib/time';
 
 const MONDAY = 1;
@@ -15,12 +14,6 @@ function at(now: Date, offsetMs: number): string {
 
 /** `?lang=zh&theme=light&panel=0` on the dev URL pick the mock's settings, for screenshots. */
 const query = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-
-/** `?clawd=celebrating` (or any other mood) holds Clawd in that mood, for screenshots. */
-export function devClawdMood(): ClawdMood | undefined {
-  const mood = query.get('clawd');
-  return isClawdMood(mood) ? mood : undefined;
-}
 
 export const SAMPLE_SETTINGS: Settings = {
   folder: 'C:\\Users\\you\\OneDrive\\Vindictive',

@@ -1,11 +1,12 @@
 import type { Tip } from '../types';
 import { locale, t } from '../lib/i18n';
-import { isRelativeSrc, type ImageResolver } from '../lib/markdown';
+import { isRelativeSrc } from '../lib/markdown';
 import { countdown, parseNaive } from '../lib/time';
 import { spanFor, tileSize } from '../lib/tileSize';
 import { tileColor } from '../lib/tileColor';
 import { el } from './dom';
 import { KIND_GLYPH, labelFor } from './glyphs';
+import type { VersionedResolver } from './images';
 import { animate } from './motion';
 
 export interface TileOptions {
@@ -18,8 +19,8 @@ export interface TileOptions {
   onMenu?: (id: string, x: number, y: number) => void;
   /** Index for the staggered entry animation; `undefined` means no entry animation. */
   enterIndex?: number;
-  /** Resolves a figure path to something an `<img>` can show. */
-  resolveImage?: ImageResolver;
+  /** Resolves a figure path to something an `<img>` can show (cached per tip sha). */
+  resolveImage?: VersionedResolver;
 }
 
 /** How long the tilt release runs before the board flips. */
@@ -50,7 +51,13 @@ function ariaLabel(tip: Tip, cd: string | undefined, isNextUp: boolean): string 
   const parts = [labelFor(tip.kind), tip.title];
   if (cd) parts.push(cd);
   if (isNextUp) parts.unshift(t('nextUp'));
+  if (warningsOf(tip).length) parts.push(t('tileWarnings'));
   return parts.join(', ');
+}
+
+/** Parse warnings the backend attached to the tip (empty strings dropped). */
+function warningsOf(tip: Tip): string[] {
+  return (tip.warnings ?? []).filter((w) => w.trim().length > 0);
 }
 
 function topRow(tip: Tip, cd: string | undefined, isNextUp: boolean): HTMLElement {
@@ -59,6 +66,7 @@ function topRow(tip: Tip, cd: string | undefined, isNextUp: boolean): HTMLElemen
     { className: 'tile-top' },
     isNextUp ? el('span', { className: 'tile-next', text: t('next') }) : null,
     cd ? el('span', { className: 'tile-countdown', text: cd }) : null,
+    warningsOf(tip).length ? el('span', { className: 'tile-warn', 'aria-hidden': 'true', text: '!' }) : null,
     el('span', { className: 'tile-glyph', 'aria-hidden': 'true', text: KIND_GLYPH[tip.kind] }),
   );
 }
@@ -69,23 +77,65 @@ function displayTitle(tip: Tip): string {
 }
 
 /** First figure of a tip, shown faintly on md / wide tiles. */
-function thumbnail(tip: Tip, resolve: ImageResolver | undefined): HTMLElement | null {
+function thumbnail(tip: Tip, resolve: VersionedResolver | undefined): HTMLElement | null {
   const src = tip.images?.[0];
   if (!src || !resolve) return null;
-  const img = el('img', { className: 'tile-figure-img', alt: '', 'aria-hidden': 'true', draggable: 'false' });
+  const img = el('img', { className: 'tile-figure-img', alt: '', 'aria-hidden': 'true', draggable: 'false', decoding: 'async', loading: 'lazy' });
   const frame = el('span', { className: 'tile-figure', 'aria-hidden': 'true' }, img);
   const apply = (url: string): void => {
     img.src = url;
     frame.classList.add('tile-figure-ready');
   };
   if (isRelativeSrc(src)) {
-    resolve(src)
+    resolve(src, tip.sha)
       .then(apply)
       .catch(() => frame.remove());
   } else {
     apply(src);
   }
   return frame;
+}
+
+/**
+ * Everything about a tile except its countdown text. Two renders with the
+ * same signature can share one DOM node; only the countdown is refreshed
+ * (see `updateTile`). A different signature means the tile is rebuilt.
+ */
+export function tileSignature(tip: Tip, isNextUp: boolean, now: Date, columns: number): string {
+  const size = tileSize(tip, isNextUp, now);
+  const [cols, rows] = spanFor(size, columns);
+  const colour = tileColor(tip, now);
+  return JSON.stringify([
+    tip.sha ?? '',
+    tip.kind,
+    tip.status,
+    displayTitle(tip),
+    tip.images?.[0] ?? '',
+    size,
+    cols,
+    rows,
+    isNextUp,
+    colour.overdue,
+    colour.bg,
+    colour.fg,
+    countdownText(tip, now) !== undefined,
+    warningsOf(tip),
+  ]);
+}
+
+/**
+ * Refresh a kept tile in place: countdown text and accessible name. Returns
+ * `false` (and changes nothing) when the tile's signature differs, in which
+ * case the caller must replace it with a fresh `renderTile`.
+ */
+export function updateTile(button: HTMLElement, tip: Tip, isNextUp: boolean, now: Date, columns: number): boolean {
+  if (button.dataset.id !== tip.id || button.dataset.sig !== tileSignature(tip, isNextUp, now, columns)) return false;
+  const cd = countdownText(tip, now);
+  const label = button.querySelector('.tile-countdown');
+  if (label && cd !== undefined && label.textContent !== cd) label.textContent = cd;
+  const aria = ariaLabel(tip, cd, isNextUp);
+  if (button.getAttribute('aria-label') !== aria) button.setAttribute('aria-label', aria);
+  return true;
 }
 
 /** Build one tile `<button>`. */
@@ -107,6 +157,8 @@ export function renderTile(options: TileOptions): HTMLButtonElement {
       className: classes.join(' '),
       type: 'button',
       'data-id': tip.id,
+      'data-sig': tileSignature(tip, isNextUp, now, columns),
+      'data-warn': warningsOf(tip).length ? String(warningsOf(tip).length) : undefined,
       'aria-label': ariaLabel(tip, cd, isNextUp),
       title: tip.title,
       draggable: 'true',
@@ -117,7 +169,17 @@ export function renderTile(options: TileOptions): HTMLButtonElement {
   );
   button.style.setProperty('--tile-bg', colour.bg);
   button.style.setProperty('--tile-fg', colour.fg);
-  if (enterIndex !== undefined) button.style.setProperty('--i', String(enterIndex));
+  if (enterIndex !== undefined) {
+    button.style.setProperty('--i', String(enterIndex));
+    // Kept nodes may be moved in the DOM later; drop the entry class once it
+    // has played so a move never replays the entrance.
+    const entered = (event: AnimationEvent): void => {
+      if (event.target !== button || event.animationName !== 'tile-enter') return;
+      button.classList.remove('tile-enter');
+      button.removeEventListener('animationend', entered);
+    };
+    button.addEventListener('animationend', entered);
+  }
   button.style.gridColumn = `span ${cols}`;
   button.style.gridRow = `span ${rows}`;
   button.addEventListener('pointerdown', (event) => {

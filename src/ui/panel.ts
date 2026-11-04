@@ -41,7 +41,7 @@ export class Panel {
   constructor() {
     this.element = el(
       'section',
-      { className: 'panel', 'aria-label': 'clock and weather', 'data-tauri-drag-region': true },
+      { className: 'panel', 'aria-label': t('panelLabel'), 'data-tauri-drag-region': true },
       el('div', { className: 'panel-time' }, el('span', { className: 'panel-clock' }, this.hm, this.sec), this.date),
       this.clawd.element,
       el('div', { className: 'panel-weather' }, el('span', { className: 'panel-now' }, this.glyph, this.temp, this.place), this.detail),
@@ -74,6 +74,7 @@ export class Panel {
 
   update(data: PanelData): void {
     this.language = data.language;
+    this.element.setAttribute('aria-label', t('panelLabel', data.language));
     this.element.hidden = !data.visible;
     this.element.dataset.weather = data.weatherStatus;
     this.tick();

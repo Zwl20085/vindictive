@@ -2,6 +2,7 @@ import { call, on } from '../api';
 import { describeCapture } from '../lib/capture-hint';
 import { setLocale, t } from '../lib/i18n';
 import { el, mount } from './dom';
+import { errorMessage } from './errors';
 
 export const HINT_RESET_MS = 3000;
 
@@ -21,23 +22,29 @@ export function renderCapture(root: HTMLElement): void {
     placeholder: t('capturePlaceholder'),
     autocomplete: 'off',
     spellcheck: 'false',
-    'aria-label': 'New tip',
+    'aria-label': t('addTip'),
   });
   const hint = el('p', { className: 'capture-hint', text: t('captureHint'), 'aria-live': 'polite' });
   let busy = false;
+  let hintTimer: ReturnType<typeof setTimeout> | undefined;
 
   const applyLanguage = (): void => {
     input.placeholder = t('capturePlaceholder');
+    input.setAttribute('aria-label', t('addTip'));
     if (!input.value.trim()) hint.textContent = t('captureHint');
   };
   const resetHint = (): void => {
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = undefined;
     hint.textContent = t('captureHint');
     hint.dataset.state = '';
   };
   const setHint = (text: string, state: 'ok' | 'error'): void => {
     hint.textContent = text;
     hint.dataset.state = state;
-    setTimeout(resetHint, HINT_RESET_MS);
+    // One pending reset at a time: a newer message restarts the clock.
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = setTimeout(resetHint, HINT_RESET_MS);
   };
 
   const submit = async (): Promise<void> => {
@@ -51,7 +58,7 @@ export function renderCapture(root: HTMLElement): void {
       setHint(t('captureSaved'), 'ok');
       await hide();
     } catch (error) {
-      setHint(error instanceof Error ? error.message : String(error), 'error');
+      setHint(errorMessage(error), 'error');
     } finally {
       busy = false;
       input.disabled = false;
@@ -60,6 +67,10 @@ export function renderCapture(root: HTMLElement): void {
   };
 
   input.addEventListener('input', () => {
+    // Typing replaces a saved/error message; its pending reset must not wipe the preview.
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = undefined;
+    hint.dataset.state = '';
     hint.textContent = input.value.trim() ? describeCapture(input.value) || t('captureHint') : t('captureHint');
   });
   input.addEventListener('keydown', (event) => {

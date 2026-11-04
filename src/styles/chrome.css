@@ -38,25 +38,47 @@
   color: #1a1a1a;
 }
 
+/* A 6 px square drawn inside a 14 px button, so it is easy to hit and to focus. */
 .sync-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--fg-muted);
+  width: 14px;
+  height: 14px;
+  padding: 4px;
+  margin: 0 -4px;
+  border: 0;
+  background-color: var(--fg-muted);
+  background-clip: content-box;
   flex: 0 0 auto;
   cursor: pointer;
 }
 
+.sync-dot:focus-visible {
+  outline-offset: 0;
+}
+
+/* Read by assistive technology, not drawn. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .sync-dot[data-state='ok'] {
-  background: var(--ok);
+  background-color: var(--ok);
 }
 
 .sync-dot[data-state='syncing'] {
-  background: var(--warn);
+  background-color: var(--warn);
   animation: sync-pulse 900ms ease-in-out infinite;
 }
 
 .sync-dot[data-state='error'] {
-  background: var(--error);
+  background-color: var(--error);
 }
 
 @keyframes sync-pulse {
@@ -177,7 +199,8 @@
 
 .menu-item:hover,
 .menu-item:focus-visible {
-  background: rgb(255 255 255 / 0.1);
+  /* Mixed from the text colour so it shows on light themes too. */
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
   outline: none;
 }
 

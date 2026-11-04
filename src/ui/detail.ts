@@ -6,6 +6,7 @@ import { TILE_SIZES, tileSize, type TileSize } from '../lib/tileSize';
 import { isRelativeSrc, renderMarkdown, resolveImages, type ImageResolver } from '../lib/markdown';
 import { el } from './dom';
 import { KIND_GLYPH, labelFor } from './glyphs';
+import type { VersionedResolver } from './images';
 import { showLightbox } from './lightbox';
 import { animate } from './motion';
 
@@ -31,7 +32,8 @@ export interface DetailActions {
   /** Show the tip's file in Explorer. */
   onReveal: (id: string) => void;
   onBack: () => void;
-  resolveImage: ImageResolver;
+  /** Figure resolver; the tip's sha is passed as the cache version. */
+  resolveImage: VersionedResolver;
 }
 
 export interface DetailOptions {
@@ -42,15 +44,31 @@ export interface DetailOptions {
   isNextUp?: boolean;
 }
 
-function header(tip: Tip, now: Date): HTMLElement {
+function subtitle(tip: Tip, now: Date): string {
   const due = parseNaive(tip.due_at);
-  const sub = due ? `${countdown(due, now, locale())} · ${formatLocal(due, locale())}` : labelFor(tip.kind);
+  return due ? `${countdown(due, now, locale())} · ${formatLocal(due, locale())}` : labelFor(tip.kind);
+}
+
+function header(tip: Tip, now: Date): HTMLElement {
+  const sub = subtitle(tip, now);
   return el(
     'header',
     { className: 'detail-header' },
     el('span', { className: 'detail-kind' }, el('span', { 'aria-hidden': 'true', text: KIND_GLYPH[tip.kind] }), ` ${labelFor(tip.kind)}`),
     el('h1', { className: 'detail-title' }, el('span', { className: 'detail-title-text', text: tip.title })),
     el('p', { className: 'detail-sub', text: sub }),
+  );
+}
+
+/** Problems the backend found reading the tip's frontmatter, one per line. */
+function warningsBlock(tip: Tip): HTMLElement | null {
+  const warnings = (tip.warnings ?? []).filter((w) => w.trim().length > 0);
+  if (!warnings.length) return null;
+  return el(
+    'section',
+    { className: 'detail-warnings', role: 'note', 'aria-label': t('warningsHeading') },
+    el('h2', { className: 'detail-section-title', text: t('warningsHeading') }),
+    el('ul', { className: 'detail-warning-list' }, ...warnings.map((w) => el('li', { text: w }))),
   );
 }
 
@@ -175,7 +193,7 @@ function figures(tip: Tip, resolve: ImageResolver): HTMLElement | null {
   if (!sources.length) return null;
   const items = sources.map((src, index) => {
     const name = figureName(src);
-    const img = el('img', { className: 'detail-figure-img', alt: name, draggable: 'false' });
+    const img = el('img', { className: 'detail-figure-img', alt: name, draggable: 'false', decoding: 'async', loading: 'lazy' });
     const button = el('button', { className: 'detail-figure', type: 'button', title: name }, img, el('span', { className: 'detail-figure-caption', text: name }));
     button.style.setProperty('--i', String(index));
     const load = isRelativeSrc(src) ? resolve(src) : Promise.resolve(src);
@@ -209,9 +227,32 @@ function linksList(tip: Tip, onOpenLink: (url: string) => void): HTMLElement | n
   return el('ul', { className: 'detail-links' }, ...items);
 }
 
-function body(tip: Tip, resolveImage: ImageResolver): HTMLElement {
+/**
+ * Links in the rendered markdown must never navigate the webview: http(s)
+ * links go to the system browser, anything else (fragments, `file:`,
+ * relative paths) is ignored. Middle-click is handled the same way.
+ */
+function interceptLinks(node: HTMLElement, onOpenLink: (url: string) => void): void {
+  const handle = (event: MouseEvent): void => {
+    if (event.type === 'auxclick' && event.button !== 1) return;
+    const anchor = (event.target as Element | null)?.closest?.('a[href]');
+    if (!anchor || !node.contains(anchor)) return;
+    event.preventDefault();
+    const href = anchor.getAttribute('href')?.trim() ?? '';
+    if (/^https?:\/\//i.test(href)) onOpenLink(href);
+  };
+  node.addEventListener('click', handle);
+  node.addEventListener('auxclick', handle);
+}
+
+function body(tip: Tip, resolveImage: ImageResolver, onOpenLink: (url: string) => void): HTMLElement {
   const node = el('article', { className: 'detail-body markdown' });
   node.innerHTML = renderMarkdown(tip.body);
+  interceptLinks(node, onOpenLink);
+  node.querySelectorAll('img').forEach((img) => {
+    img.decoding = 'async';
+    img.setAttribute('loading', 'lazy');
+  });
   void resolveImages(node, resolveImage);
   // Body images open the same viewer as the figure strip.
   node.querySelectorAll('img').forEach((img) => {
@@ -228,10 +269,12 @@ function actionBar(tip: Tip, now: Date, actions: DetailActions, panel: HTMLEleme
     b.addEventListener('click', onClick);
     return b;
   };
-  const done = (): void => {
+  /** Freeze every action, play the leaving animation, then run `then`. */
+  const leave = (then: () => void): void => {
     panel.querySelectorAll<HTMLButtonElement>('.action').forEach((b) => (b.disabled = true));
-    void animate(panel, 'detail-leaving', DONE_MS).then(() => actions.onDone(tip.id));
+    void animate(panel, 'detail-leaving', DONE_MS).then(then);
   };
+  const done = (): void => leave(() => actions.onDone(tip.id));
   const primary =
     tip.status === 'done'
       ? button(t('reopen'), () => actions.onReopen(tip.id), 'action-primary')
@@ -242,8 +285,7 @@ function actionBar(tip: Tip, now: Date, actions: DetailActions, panel: HTMLEleme
     if (armed) {
       clearTimeout(armed);
       armed = undefined;
-      panel.querySelectorAll<HTMLButtonElement>('.action').forEach((b) => (b.disabled = true));
-      void animate(panel, 'detail-leaving', DONE_MS).then(() => actions.onDelete(tip.id));
+      leave(() => actions.onDelete(tip.id));
       return;
     }
     del.textContent = t('deleteConfirm');
@@ -272,14 +314,20 @@ function actionBar(tip: Tip, now: Date, actions: DetailActions, panel: HTMLEleme
 export function renderDetail(options: DetailOptions): HTMLElement {
   const { tip, now, actions, isNextUp = false } = options;
   const colour = tileColor(tip, now);
-  const panel = el('section', { className: 'detail', role: 'dialog', 'aria-modal': 'true', 'aria-label': tip.title });
+  // Figures are cached per tip version, so an edited image is fetched again.
+  const resolve: ImageResolver = (src) => actions.resolveImage(src, tip.sha);
+  // tabindex -1: the app focuses the panel when it opens (not a tab stop).
+  const panel = el('section', { className: 'detail', role: 'dialog', 'aria-modal': 'true', 'aria-label': tip.title, tabindex: '-1' });
+  panel.dataset.id = tip.id;
+  panel.dataset.sha = tip.sha ?? '';
   panel.append(
     header(tip, now),
     ...[
+      warningsBlock(tip),
       metaRows(tip),
       paperBlock(tip, actions.onOpenLink),
-      figures(tip, actions.resolveImage),
-      body(tip, actions.resolveImage),
+      figures(tip, resolve),
+      body(tip, resolve, actions.onOpenLink),
       linksList(tip, actions.onOpenLink),
       tileSection(tip, isNextUp, now, actions),
     ].filter(
@@ -290,4 +338,14 @@ export function renderDetail(options: DetailOptions): HTMLElement {
   panel.style.setProperty('--tile-bg', colour.bg);
   panel.style.setProperty('--tile-fg', colour.fg);
   return panel;
+}
+
+/**
+ * Refresh the time-dependent text of a detail panel that is kept between
+ * renders (the countdown in the header), without rebuilding it.
+ */
+export function refreshDetail(panel: HTMLElement, tip: Tip, now: Date): void {
+  const sub = panel.querySelector('.detail-sub');
+  const text = subtitle(tip, now);
+  if (sub && sub.textContent !== text) sub.textContent = text;
 }

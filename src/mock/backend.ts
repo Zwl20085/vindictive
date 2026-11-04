@@ -105,17 +105,117 @@ function slug(text: string): string {
   );
 }
 
-function createTip(text: string): Tip {
-  const title = text
-    .split(/\s+/)
-    .filter((w) => !/^[#!@^>＃！＠＾＞]/.test(w))
-    .join(' ')
-    .trim();
-  if (!title) throw new Error('capture text has no title');
-  const id = `${toNaive(new Date()).slice(0, 10)}-${slug(title)}`;
-  const priority = /!high\b/.test(text) ? 'high' : /!low\b/.test(text) ? 'low' : 'normal';
-  const tags = Array.from(text.matchAll(/[#＃]([\w一-鿿]+)/g)).map((m) => m[1] ?? '');
-  return { id, path: `${id}.md`, title, kind: 'task', priority, status: 'open', tags, body: '', remind_at: [] };
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+const dateOnly = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const FULL_WIDTH: Record<string, string> = { '＃': '#', '！': '!', '＠': '@', '＾': '^', '＞': '>' };
+const CAPTURE_KINDS: Record<string, Tip['kind']> = {
+  task: 'task',
+  deadline: 'deadline',
+  due: 'deadline',
+  note: 'note',
+  reading: 'reading',
+  read: 'reading',
+  paper: 'reading',
+  event: 'event',
+  meeting: 'event',
+};
+const CAPTURE_TIME_RE = /^\d{1,2}:\d{2}$/;
+
+/** `@today`, `@tomorrow`, `@2026-10-15` (or with slashes) as a date; `undefined` otherwise. */
+function captureDate(word: string, now: Date): Date | undefined {
+  const w = word.toLowerCase();
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (w === 'today' || w === 'tod') return day;
+  if (w === 'tomorrow' || w === 'tom' || w === 'tmr') return new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  if (w === 'nextweek') return new Date(day.getFullYear(), day.getMonth(), day.getDate() + 7);
+  const m = /^(\d{4})[-/](\d{2})[-/](\d{2})$/.exec(word);
+  return m ? parseNaive(`${m[1]}-${m[2]}-${m[3]}`) : undefined;
+}
+
+/**
+ * A small subset of `core/capture.rs`: `#tag`, `!high`/`!low`, `>kind`,
+ * `@date [HH:MM]` and `^place`; every other word is the title.
+ */
+export function parseCaptureText(text: string, now = new Date()): Omit<Tip, 'id' | 'path'> {
+  const title: string[] = [];
+  const tags: string[] = [];
+  let priority: Tip['priority'] = 'normal';
+  let kind: Tip['kind'] = 'task';
+  let due: string | undefined;
+  let location: string | undefined;
+  for (const raw of text.trim().split(/\s+/).filter(Boolean)) {
+    const word = (FULL_WIDTH[raw.charAt(0)] ?? raw.charAt(0)) + raw.slice(1);
+    const rest = word.slice(1);
+    const lower = rest.toLowerCase();
+    const date = word.startsWith('@') ? captureDate(rest, now) : undefined;
+    if (word.startsWith('#') && rest) tags.push(rest);
+    else if (word.startsWith('!') && ['high', 'h', 'low', 'l'].includes(lower)) priority = lower.startsWith('h') ? 'high' : 'low';
+    else if (word.startsWith('>') && CAPTURE_KINDS[lower]) kind = CAPTURE_KINDS[lower];
+    else if (word.startsWith('^') && rest) location = rest.replace(/^["“]|["”]$/g, '');
+    else if (date) due = dateOnly(date);
+    else if (due && !due.includes(' ') && CAPTURE_TIME_RE.test(word)) due = `${due} ${word.padStart(5, '0')}`;
+    else title.push(raw);
+  }
+  const joined = title.join(' ').trim();
+  if (!joined) throw new Error('capture text has no title');
+  const dueAt = due ? parseNaive(due.includes(' ') ? due : `${due}${END_OF_DAY}`) : undefined;
+  return {
+    title: joined,
+    kind,
+    priority,
+    status: 'open',
+    tags,
+    due,
+    due_at: dueAt ? toNaive(dueAt) : undefined,
+    location,
+    body: '',
+    remind_at: [],
+  };
+}
+
+/** `base`, else `base-2`, `base-3`… whichever no tip uses yet (file names are ids). */
+function uniqueId(base: string, taken: readonly Tip[]): string {
+  const ids = new Set(taken.map((t) => t.id));
+  if (!ids.has(base)) return base;
+  let n = 2;
+  while (ids.has(`${base}-${n}`)) n += 1;
+  return `${base}-${n}`;
+}
+
+function createTip(text: string, existing: readonly Tip[]): Tip {
+  const parsed = parseCaptureText(text);
+  const id = uniqueId(`${toNaive(new Date()).slice(0, 10)}-${slug(parsed.title)}`, existing);
+  return { ...parsed, id, path: `${id}.md` };
+}
+
+/**
+ * The next occurrence of a repeating tip, one interval after its current due
+ * (or after now when it has none). Only the step matters here: `daily`,
+ * `weekdays`, `weekly …`, `monthly …`, `yearly …`; the real rules live in
+ * `core/recur.rs`. `undefined` for a rule the mock does not know.
+ */
+export function nextOccurrence(repeat: string, from: Date): Date | undefined {
+  const rule = repeat.trim().toLowerCase();
+  const d = new Date(from.getTime());
+  if (rule.startsWith('daily')) d.setDate(d.getDate() + 1);
+  else if (rule.startsWith('weekdays')) {
+    do d.setDate(d.getDate() + 1);
+    while (d.getDay() === 0 || d.getDay() === 6);
+  } else if (rule.startsWith('weekly')) d.setDate(d.getDate() + 7);
+  else if (rule.startsWith('monthly')) d.setMonth(d.getMonth() + 1);
+  else if (rule.startsWith('yearly')) d.setFullYear(d.getFullYear() + 1);
+  else return undefined;
+  return d;
+}
+
+/** Done on a repeating tip rolls it forward and keeps it open, like the real backend. */
+function complete(tip: Tip, now: Date): Tip {
+  const current = parseNaive(tip.due_at);
+  const next = tip.repeat ? nextOccurrence(tip.repeat, current ?? now) : undefined;
+  if (!next) return { ...tip, status: 'done', done_at: toNaive(now) };
+  const hadTime = !tip.due || /\d:\d{2}/.test(tip.due);
+  const due = hadTime ? `${dateOnly(next)} ${pad2(next.getHours())}:${pad2(next.getMinutes())}` : dateOnly(next);
+  return { ...tip, status: 'open', due, due_at: toNaive(next), snoozed_until: undefined, snoozed_until_at: undefined };
 }
 
 /** The mock's version of `core/edit.rs`: same rules, fewer checks. */
@@ -157,14 +257,13 @@ function mockWeather(location: string): Weather {
 const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => ReturnType<Commands[K]> | Promise<ReturnType<Commands[K]>> } = {
   get_state: () => buildState(),
   sync_now: () => update({ lastSync: toNaive(new Date()) }),
-  mark_done: ({ id }) =>
-    update({ tips: replaceTip(id, (t) => ({ ...t, status: 'done', done_at: toNaive(new Date()) })) }),
+  mark_done: ({ id }) => update({ tips: replaceTip(id, (t) => complete(t, new Date())) }),
   reopen: ({ id }) => update({ tips: replaceTip(id, (t) => ({ ...t, status: 'open', done_at: undefined })) }),
   snooze: ({ id, minutes }) => {
     const until = toNaive(new Date(Date.now() + minutes * MINUTE_MS));
     return update({ tips: replaceTip(id, (t) => ({ ...t, snoozed_until: until, snoozed_until_at: until })) });
   },
-  create_tip: ({ text }) => update({ tips: [createTip(text), ...store.tips] }),
+  create_tip: ({ text }) => update({ tips: [createTip(text, store.tips), ...store.tips] }),
   fit_window: () => undefined,
   set_color: ({ id, color }) => update({ tips: replaceTip(id, (t) => ({ ...t, color: color ?? undefined })) }),
   set_order: ({ id, order }) => update({ tips: replaceTip(id, (t) => ({ ...t, order: order ?? undefined })) }),
