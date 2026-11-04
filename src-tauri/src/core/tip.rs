@@ -267,6 +267,14 @@ pub struct FrontMatter {
         skip_serializing_if = "Option::is_none"
     )]
     pub created: Option<String>,
+    /// Words or phrases to highlight on the tile and in the body
+    /// (case-insensitive), on top of the global list in Settings.
+    #[serde(
+        default,
+        deserialize_with = "lenient::string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub highlight: Vec<String>,
     /// Any keys we do not understand are preserved verbatim.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_yaml::Value>,
@@ -797,6 +805,50 @@ body
         assert_eq!(json["priority"], "high");
         let back: Tip = serde_json::from_value(json).unwrap();
         assert_eq!(back, tip);
+    }
+
+    #[test]
+    fn highlight_round_trips_and_reads_a_single_word() {
+        let text = "---
+title: t
+highlight: [rebuttal, Reviewer 2]
+---
+body
+";
+        let tip = Tip::parse("x.md", None, text).unwrap();
+        assert_eq!(tip.front.highlight, vec!["rebuttal", "Reviewer 2"]);
+        let md = tip.to_markdown().unwrap();
+        assert!(
+            md.contains(
+                "highlight:
+- rebuttal
+- Reviewer 2"
+            ),
+            "{md}"
+        );
+        assert_eq!(Tip::parse("x.md", None, &md).unwrap().front, tip.front);
+        let json = serde_json::to_value(&tip).unwrap();
+        assert_eq!(
+            json["highlight"],
+            serde_json::json!(["rebuttal", "Reviewer 2"])
+        );
+        assert_eq!(serde_json::from_value::<Tip>(json).unwrap(), tip);
+        // A scalar is a one-item list; none at all writes no key.
+        let one = Tip::parse(
+            "x.md",
+            None,
+            "---
+title: t
+highlight: 2024
+---
+",
+        )
+        .unwrap();
+        assert_eq!(one.front.highlight, vec!["2024"]);
+        let none = Tip::parse("x.md", None, SAMPLE).unwrap();
+        assert!(none.front.highlight.is_empty());
+        assert!(!none.to_markdown().unwrap().contains("highlight"));
+        assert!(!serde_json::to_string(&none).unwrap().contains("highlight"));
     }
 
     #[test]

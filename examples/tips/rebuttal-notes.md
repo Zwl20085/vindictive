@@ -4,6 +4,7 @@ kind: note
 priority: normal
 status: open
 tags: [paper, rebuttal]
+highlight: [rebuttal, Reviewer 2]
 ---
 
 Points to address before drafting the response:

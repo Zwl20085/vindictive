@@ -1,11 +1,13 @@
 //! In-app editing of a tip: validate the fields the edit form sends and
-//! build the new tip. Every frontmatter key the form does not show (remind,
-//! links, images, repeat, colour, size, order, paper ids, snooze, done,
-//! created and unknown keys) is carried over untouched.
+//! build the new tip. Every frontmatter key the form does not show (order,
+//! paper ids, snooze, done, created and unknown keys) is carried over
+//! untouched, and a shown field the user left as it was keeps the exact text
+//! of the file, so a save that changes one field rewrites only that field.
 
 use serde::Deserialize;
 
-use super::timeparse::parse_due;
+use super::recur;
+use super::timeparse::{is_offset, parse_datetime, parse_due, parse_offset};
 use super::tip::{FrontMatter, Kind, Priority, Tip};
 
 pub const MAX_TITLE_CHARS: usize = 200;
@@ -14,9 +16,21 @@ pub const MAX_TAGS: usize = 32;
 pub const MAX_TAG_CHARS: usize = 64;
 pub const MAX_BODY_CHARS: usize = 100_000;
 pub const MAX_DUE_CHARS: usize = 40;
+pub const MAX_REMINDS: usize = 32;
+pub const MAX_REPEAT_CHARS: usize = 100;
+pub const MAX_LINKS: usize = 32;
+pub const MAX_LINK_CHARS: usize = 500;
+pub const MAX_IMAGES: usize = 32;
+pub const MAX_IMAGE_CHARS: usize = 500;
+pub const MAX_HIGHLIGHTS: usize = 32;
+pub const MAX_HIGHLIGHT_CHARS: usize = 64;
+pub const MIN_HIGHLIGHT_CHARS: usize = 2;
+/// Tile size overrides, as written in `size:`.
+pub const TILE_SIZES: [&str; 3] = ["sm", "md", "wide"];
 
-/// The fields of the edit form, as the frontend sends them.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// The fields of the edit form, as the frontend sends them. Every field but
+/// the first three may be missing (an older form), which means empty.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 pub struct TipEdit {
     pub title: String,
     pub kind: Kind,
@@ -28,6 +42,25 @@ pub struct TipEdit {
     pub location: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Offsets from `due` (`-1d`, `-2h`) or dates; blank entries dropped.
+    #[serde(default)]
+    pub remind: Vec<String>,
+    /// A `recur` rule (`weekly on mon`); `None` or blank clears it.
+    #[serde(default)]
+    pub repeat: Option<String>,
+    #[serde(default)]
+    pub links: Vec<String>,
+    /// Relative to the tips folder, or an `https://` URL.
+    #[serde(default)]
+    pub images: Vec<String>,
+    /// `#rgb` / `#rrggbb`; `None` or blank clears it.
+    #[serde(default)]
+    pub color: Option<String>,
+    /// `sm`, `md` or `wide`; `None` or blank clears it.
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub highlight: Vec<String>,
     #[serde(default)]
     pub body: String,
 }
@@ -46,14 +79,24 @@ pub fn apply(tip: &Tip, edit: TipEdit) -> Result<Tip, String> {
     }
     let body = edit.body.replace("\r\n", "\n");
     check_len("text", &body, MAX_BODY_CHARS)?;
+    let old = &tip.front;
+    let due = due(tip, edit.due.as_deref())?;
+    let has_due = due.as_deref().and_then(parse_due).is_some();
     let front = FrontMatter {
         title,
         kind: edit.kind,
         priority: edit.priority,
-        due: due(tip, edit.due.as_deref())?,
         location,
         tags: tags(&edit.tags)?,
-        ..tip.front.clone()
+        remind: keep_list(&old.remind, &edit.remind, |l| remind(l, has_due))?,
+        repeat: keep_opt(&old.repeat, edit.repeat.as_deref(), repeat)?,
+        links: keep_list(&old.links, &edit.links, links)?,
+        images: keep_list(&old.images, &edit.images, images)?,
+        color: keep_opt(&old.color, edit.color.as_deref(), color)?,
+        size: keep_opt(&old.size, edit.size.as_deref(), |s| tile_size(&s))?,
+        highlight: keep_list(&old.highlight, &edit.highlight, highlight_words)?,
+        due,
+        ..old.clone()
     };
     Ok(Tip::from_parts(&tip.path, tip.sha.clone(), front, body))
 }
@@ -70,6 +113,44 @@ fn optional(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
+}
+
+/// Entries trimmed, blank ones dropped.
+fn cleaned(raw: &[String]) -> Vec<String> {
+    raw.iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// A list field: the file's own strings when the form shows the same values
+/// (even ones that would not validate today, such as a reminder the file
+/// already warns about), else the validated new list.
+fn keep_list(
+    old: &[String],
+    new: &[String],
+    check: impl FnOnce(Vec<String>) -> Result<Vec<String>, String>,
+) -> Result<Vec<String>, String> {
+    let new = cleaned(new);
+    if new == cleaned(old) {
+        return Ok(old.to_vec());
+    }
+    check(new)
+}
+
+/// A single optional field, with the same "unchanged keeps the file's text"
+/// rule as `keep_list`. Blank clears it.
+fn keep_opt(
+    old: &Option<String>,
+    new: Option<&str>,
+    check: impl FnOnce(String) -> Result<String, String>,
+) -> Result<Option<String>, String> {
+    let new = optional(new);
+    if new == optional(old.as_deref()) {
+        return Ok(old.clone());
+    }
+    new.map(check).transpose()
 }
 
 /// The new `due` string. Unchanged dates keep the string as written in the
@@ -116,6 +197,125 @@ fn tags(raw: &[String]) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// Each reminder is an offset from the due date or an absolute date.
+fn remind(list: Vec<String>, has_due: bool) -> Result<Vec<String>, String> {
+    if list.len() > MAX_REMINDS {
+        return Err(format!("at most {MAX_REMINDS} reminders"));
+    }
+    for entry in &list {
+        check_len("reminder", entry, MAX_DUE_CHARS)?;
+        if is_offset(entry) && parse_offset(entry).is_some() {
+            if !has_due {
+                return Err(format!(
+                    "remind {entry:?} is relative to the due date; set a due date first"
+                ));
+            }
+        } else if parse_datetime(entry, (9, 0)).is_none() {
+            return Err(format!(
+                "remind {entry:?} is not an offset like -1d or a date"
+            ));
+        }
+    }
+    Ok(list)
+}
+
+fn repeat(rule: String) -> Result<String, String> {
+    check_len("repeat rule", &rule, MAX_REPEAT_CHARS)?;
+    if recur::parse(&rule).is_none() {
+        return Err(format!(
+            "repeat {rule:?} is not a rule like daily, weekdays, weekly on mon,thu, monthly on 1 or yearly on 03-15"
+        ));
+    }
+    Ok(rule)
+}
+
+fn links(list: Vec<String>) -> Result<Vec<String>, String> {
+    if list.len() > MAX_LINKS {
+        return Err(format!("at most {MAX_LINKS} links"));
+    }
+    for link in &list {
+        check_len("link", link, MAX_LINK_CHARS)?;
+    }
+    Ok(list)
+}
+
+fn images(list: Vec<String>) -> Result<Vec<String>, String> {
+    if list.len() > MAX_IMAGES {
+        return Err(format!("at most {MAX_IMAGES} images"));
+    }
+    for image in &list {
+        check_len("image path", image, MAX_IMAGE_CHARS)?;
+        if !is_image_ref(image) {
+            return Err(format!(
+                "image {image:?} must be a path inside the tips folder (figures/plot.png) or an https:// URL"
+            ));
+        }
+    }
+    Ok(list)
+}
+
+/// An `https://` URL, or a relative path that stays inside the tips folder:
+/// no leading slash, no drive letter or scheme (`:`), no `..` component.
+pub fn is_image_ref(value: &str) -> bool {
+    if let Some(rest) = value.strip_prefix("https://") {
+        return !rest.trim().is_empty();
+    }
+    !value.starts_with(['/', '\\'])
+        && !value.contains(':')
+        && !value.split(['/', '\\']).any(|part| part.trim() == "..")
+}
+
+fn color(value: String) -> Result<String, String> {
+    if is_hex_color(&value) {
+        Ok(value)
+    } else {
+        Err(format!("{value:?} is not a hex colour like #4A3B6B"))
+    }
+}
+
+/// `#rgb` or `#rrggbb`.
+pub fn is_hex_color(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix('#') else {
+        return false;
+    };
+    (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// A tile size override, trimmed and lowercased; an error unless it is one
+/// of `TILE_SIZES`.
+pub fn tile_size(value: &str) -> Result<String, String> {
+    let value = value.trim().to_ascii_lowercase();
+    if TILE_SIZES.contains(&value.as_str()) {
+        Ok(value)
+    } else {
+        Err(format!("size must be one of {}", TILE_SIZES.join(", ")))
+    }
+}
+
+/// Words or phrases to highlight (a tip's `highlight:` or the global list in
+/// Settings): trimmed, blank entries and case-insensitive duplicates dropped,
+/// each 2 to 64 characters, at most 32.
+pub fn highlight_words(raw: Vec<String>) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for word in cleaned(&raw) {
+        let folded = word.to_lowercase();
+        if out.iter().any(|w| w.to_lowercase() == folded) {
+            continue;
+        }
+        if word.chars().count() < MIN_HIGHLIGHT_CHARS {
+            return Err(format!(
+                "highlight {word:?} is too short (at least {MIN_HIGHLIGHT_CHARS} characters)"
+            ));
+        }
+        check_len("highlight", &word, MAX_HIGHLIGHT_CHARS)?;
+        out.push(word);
+    }
+    if out.len() > MAX_HIGHLIGHTS {
+        return Err(format!("at most {MAX_HIGHLIGHTS} highlight words"));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +335,13 @@ mod tests {
             due: Some("2026-10-15".into()),
             location: Some("Lab 302".into()),
             tags: vec!["ecce".into(), "paper".into()],
+            remind: vec!["-1d".into()],
+            repeat: Some("weekly on mon".into()),
+            links: vec!["https://example.org".into()],
+            images: vec!["fig.png".into()],
+            color: Some("#4A3B6B".into()),
+            size: Some("wide".into()),
+            highlight: Vec::new(),
             body: "\nOld body.\n".into(),
         }
     }
@@ -163,6 +370,7 @@ mod tests {
                 location: None,
                 tags: vec!["#ecce".into(), "final".into(), "ecce".into(), " ".into()],
                 body: "New body\r\nline 2".into(),
+                ..edit()
             },
         )
         .unwrap();
@@ -292,6 +500,237 @@ mod tests {
     }
 
     #[test]
+    fn edits_the_extra_fields() {
+        let edited = apply(
+            &tip(),
+            TipEdit {
+                remind: vec![" -2h ".into(), "".into(), "2026-10-14 09:00".into()],
+                repeat: Some(" monthly on 1 ".into()),
+                links: vec![" https://a.org ".into(), "  ".into(), "doi:10.1/x".into()],
+                images: vec!["figures/plot.svg".into(), "https://x.org/a.png".into()],
+                color: Some(" #abc ".into()),
+                size: Some(" SM ".into()),
+                highlight: vec![
+                    " Reviewer 2 ".into(),
+                    "reviewer 2".into(),
+                    "".into(),
+                    "rebuttal".into(),
+                ],
+                ..edit()
+            },
+        )
+        .unwrap();
+        let f = &edited.front;
+        assert_eq!(f.remind, vec!["-2h", "2026-10-14 09:00"]);
+        assert_eq!(
+            edited.remind_at,
+            vec![dt("2026-10-14 09:00"), dt("2026-10-15 21:59")]
+        );
+        assert_eq!(f.repeat.as_deref(), Some("monthly on 1"));
+        assert_eq!(f.links, vec!["https://a.org", "doi:10.1/x"]);
+        assert_eq!(f.images, vec!["figures/plot.svg", "https://x.org/a.png"]);
+        assert_eq!(f.color.as_deref(), Some("#abc"));
+        assert_eq!(f.size.as_deref(), Some("sm"));
+        assert_eq!(f.highlight, vec!["Reviewer 2", "rebuttal"]);
+        assert!(edited.warnings.is_empty(), "{:?}", edited.warnings);
+        let again = Tip::parse(&edited.path, None, &edited.to_markdown().unwrap()).unwrap();
+        assert_eq!(again.front, edited.front);
+    }
+
+    #[test]
+    fn blank_extra_fields_clear_them() {
+        let edited = apply(
+            &tip(),
+            TipEdit {
+                remind: vec![" ".into()],
+                repeat: Some("  ".into()),
+                links: Vec::new(),
+                images: Vec::new(),
+                color: None,
+                size: Some(String::new()),
+                ..edit()
+            },
+        )
+        .unwrap();
+        let f = &edited.front;
+        assert!(f.remind.is_empty() && edited.remind_at.is_empty());
+        assert_eq!(
+            (f.repeat.as_ref(), f.color.as_ref(), f.size.as_ref()),
+            (None, None, None)
+        );
+        assert!(f.links.is_empty() && f.images.is_empty() && f.highlight.is_empty());
+        let text = edited.to_markdown().unwrap();
+        for key in ["remind:", "repeat:", "links:", "images:", "color:", "size:"] {
+            assert!(!text.contains(key), "{key} in {text}");
+        }
+    }
+
+    #[test]
+    fn unchanged_extra_fields_keep_the_files_text() {
+        // Entries that would not validate as new input (an unparsable
+        // reminder, a bad rule, an absolute image path) survive an edit that
+        // did not touch them; the tip keeps its warnings instead of failing.
+        let text = FILE
+            .replace("  - -1d", "  - someday")
+            .replace("repeat: weekly on mon", "repeat: fortnightly")
+            .replace("images: [fig.png]", "images: [/abs/fig.png]")
+            .replace("size: wide", "size: Wide");
+        let original = Tip::parse("tips/a.md", None, &text).unwrap();
+        assert!(!original.warnings.is_empty());
+        let edited = apply(
+            &original,
+            TipEdit {
+                title: "Renamed".into(),
+                remind: vec![" someday ".into(), "".into()],
+                repeat: Some("fortnightly ".into()),
+                images: vec!["/abs/fig.png".into()],
+                size: Some("Wide".into()),
+                ..edit()
+            },
+        )
+        .unwrap();
+        assert_eq!(edited.front.remind, original.front.remind);
+        assert_eq!(edited.front.repeat, original.front.repeat);
+        assert_eq!(edited.front.images, original.front.images);
+        assert_eq!(edited.front.size.as_deref(), Some("Wide"));
+        // But touching one of them validates the new value.
+        let err = apply(
+            &original,
+            TipEdit {
+                remind: vec!["someday".into(), "-1h".into()],
+                ..edit()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("someday"), "{err}");
+    }
+
+    #[test]
+    fn rejects_bad_extra_fields() {
+        let bad = |e: TipEdit| apply(&tip(), e).unwrap_err();
+        assert_eq!(
+            bad(TipEdit {
+                remind: vec!["soon".into()],
+                ..edit()
+            }),
+            r#"remind "soon" is not an offset like -1d or a date"#
+        );
+        assert!(bad(TipEdit {
+            due: None,
+            remind: vec!["-1d".into(), "-2h".into()],
+            ..edit()
+        })
+        .contains("due date"));
+        // An absolute reminder needs no due date.
+        let ok = apply(
+            &tip(),
+            TipEdit {
+                due: None,
+                remind: vec!["2026-10-14".into()],
+                ..edit()
+            },
+        )
+        .unwrap();
+        assert_eq!(ok.remind_at, vec![dt("2026-10-14 09:00")]);
+        assert!(bad(TipEdit {
+            repeat: Some("every blue moon".into()),
+            ..edit()
+        })
+        .contains("repeat"));
+        assert!(bad(TipEdit {
+            links: (0..=MAX_LINKS).map(|i| format!("https://x/{i}")).collect(),
+            ..edit()
+        })
+        .contains("links"));
+        assert!(bad(TipEdit {
+            links: vec!["x".repeat(MAX_LINK_CHARS + 1)],
+            ..edit()
+        })
+        .contains("too long"));
+        for image in [
+            "../secret.png",
+            "figures/../../x.png",
+            "/etc/x.png",
+            "\\server\\x.png",
+            "C:/x.png",
+            "http://x.org/a.png",
+            "file:///x.png",
+            "https://",
+        ] {
+            assert!(
+                bad(TipEdit {
+                    images: vec![image.into()],
+                    ..edit()
+                })
+                .contains("image"),
+                "{image}"
+            );
+        }
+        assert!(bad(TipEdit {
+            images: (0..=MAX_IMAGES).map(|i| format!("f{i}.png")).collect(),
+            ..edit()
+        })
+        .contains("images"));
+        for color in ["red", "#12345", "4A3B6B"] {
+            assert!(bad(TipEdit {
+                color: Some(color.into()),
+                ..edit()
+            })
+            .contains("hex"));
+        }
+        assert!(bad(TipEdit {
+            size: Some("huge".into()),
+            ..edit()
+        })
+        .contains("size"));
+        assert!(bad(TipEdit {
+            highlight: vec!["x".into()],
+            ..edit()
+        })
+        .contains("too short"));
+        assert!(bad(TipEdit {
+            highlight: vec!["x".repeat(MAX_HIGHLIGHT_CHARS + 1)],
+            ..edit()
+        })
+        .contains("too long"));
+        assert!(bad(TipEdit {
+            highlight: (0..=MAX_HIGHLIGHTS).map(|i| format!("w{i}")).collect(),
+            ..edit()
+        })
+        .contains("highlight"));
+    }
+
+    #[test]
+    fn highlight_word_rules() {
+        assert_eq!(
+            highlight_words(vec![" ab ".into(), "AB".into(), "Ab c".into()]).unwrap(),
+            vec!["ab", "Ab c"]
+        );
+        // Duplicates do not count against the limit.
+        let many: Vec<String> = (0..MAX_HIGHLIGHTS)
+            .flat_map(|i| [format!("w{i}"), format!("W{i}")])
+            .collect();
+        assert_eq!(highlight_words(many).unwrap().len(), MAX_HIGHLIGHTS);
+        assert!(highlight_words(vec!["审".into()]).is_err());
+        assert_eq!(highlight_words(vec!["审稿".into()]).unwrap(), vec!["审稿"]);
+        assert!(highlight_words(Vec::new()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn shared_validators() {
+        assert!(is_hex_color("#4A3B6B"));
+        assert!(is_hex_color("#abc"));
+        assert!(!is_hex_color("4A3B6B"));
+        assert!(!is_hex_color("#12345"));
+        assert!(!is_hex_color("#GGGGGG"));
+        assert_eq!(tile_size(" Wide ").unwrap(), "wide");
+        assert!(tile_size("xl").is_err());
+        assert!(is_image_ref("figures/a b.png"));
+        assert!(is_image_ref("a..b.png"));
+        assert!(!is_image_ref("figures\\..\\x.png"));
+    }
+
+    #[test]
     fn deserialises_from_the_frontend_shape() {
         let e: TipEdit = serde_json::from_str(
             r#"{"title":"T","kind":"note","priority":"low","due":null,"tags":["a"],"body":"b"}"#,
@@ -299,6 +738,31 @@ mod tests {
         .unwrap();
         assert_eq!(e.kind, Kind::Note);
         assert_eq!(e.location, None);
+        // The pre-1.0 form had no extra fields: they read as empty.
+        assert_eq!(
+            e,
+            TipEdit {
+                title: "T".into(),
+                kind: Kind::Note,
+                priority: Priority::Low,
+                tags: vec!["a".into()],
+                body: "b".into(),
+                ..Default::default()
+            }
+        );
+        let full: TipEdit = serde_json::from_str(
+            r##"{"title":"T","kind":"task","priority":"high","due":"2026-10-15","location":null,
+            "tags":[],"remind":["-1d"],"repeat":null,"links":["https://a.org"],
+            "images":["f.png"],"color":"#abc","size":"md","highlight":["ab"],"body":""}"##,
+        )
+        .unwrap();
+        assert_eq!(full.remind, vec!["-1d"]);
+        assert_eq!(full.repeat, None);
+        assert_eq!(full.links, vec!["https://a.org"]);
+        assert_eq!(full.images, vec!["f.png"]);
+        assert_eq!(full.color.as_deref(), Some("#abc"));
+        assert_eq!(full.size.as_deref(), Some("md"));
+        assert_eq!(full.highlight, vec!["ab"]);
         assert!(serde_json::from_str::<TipEdit>(
             r#"{"title":"T","kind":"chore","priority":"low"}"#
         )

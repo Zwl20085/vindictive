@@ -5,7 +5,7 @@ use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use std::path::{Path, PathBuf};
 
-use chrono::Duration;
+use chrono::{Duration, NaiveDateTime};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -15,7 +15,8 @@ use super::{editor, windows};
 use crate::core::capture;
 use crate::core::edit::{self, TipEdit};
 use crate::core::template;
-use crate::core::tip::{slugify, Kind, Tip};
+use crate::core::timeparse::format_dt;
+use crate::core::tip::{slugify, FrontMatter, Kind, Tip};
 use crate::sync::folder::{FolderError, FolderStore};
 use crate::sync::meta;
 use crate::sync::weather::{self, Weather};
@@ -25,7 +26,6 @@ const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MIN_SNOOZE_MINUTES: i64 = 1;
 const MAX_SNOOZE_MINUTES: i64 = 60 * 24 * 30;
 const MAX_LOG_CHARS: usize = 2000;
-const TILE_SIZES: [&str; 3] = ["sm", "md", "wide"];
 
 #[tauri::command]
 pub fn get_state(state: State<'_, AppState>) -> BoardState {
@@ -93,7 +93,7 @@ pub async fn set_color(
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty());
     if let Some(c) = &color {
-        if !is_hex_color(c) {
+        if !edit::is_hex_color(c) {
             return Err(format!("{c:?} is not a hex colour like #4A3B6B"));
         }
     }
@@ -115,13 +115,9 @@ pub async fn set_size(
     size: Option<String>,
 ) -> Result<BoardState, String> {
     let size = size
-        .map(|s| s.trim().to_ascii_lowercase())
-        .filter(|s| !s.is_empty());
-    if let Some(s) = &size {
-        if !TILE_SIZES.contains(&s.as_str()) {
-            return Err(format!("size must be one of {}", TILE_SIZES.join(", ")));
-        }
-    }
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| edit::tile_size(&s))
+        .transpose()?;
     let tip = find(&state, &id)?;
     let mut front = tip.front.clone();
     front.size = size;
@@ -201,14 +197,6 @@ pub fn fit_window(app: AppHandle, state: State<'_, AppState>, height: f64) -> Re
         return Err("bad height".into());
     }
     windows::fit_main(&app, state.settings().dock, height)
-}
-
-fn is_hex_color(value: &str) -> bool {
-    let hex = match value.strip_prefix('#') {
-        Some(h) => h,
-        None => return false,
-    };
-    (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Open the tip's file in the editor; returns the file path. Async and on a
@@ -309,35 +297,132 @@ pub async fn create_tip(
     }
     let created_at = now();
     let front = capture::parse(text, created_at).ok_or("could not find a title in that line")?;
-    let settings = state.settings();
-    let stem = format!(
-        "{}-{}",
-        created_at.format("%Y-%m-%d"),
-        slugify(&front.title)
-    );
-    let store = state.store()?;
-    let zh = settings.language == Language::Zh;
-    let path = capture_name(&state, &store, &stem, None);
-    let (tip, body) = template::render(&path, front.clone(), zh).map_err(|e| e.to_string())?;
-    let saved = match state.save_tip_text(&app, tip, &body, "capture").await {
-        // Another device created the same name just now: take the next one.
-        Err(e) if e == FolderError::Exists(path.clone()).to_string() => {
-            let path = capture_name(&state, &store, &stem, Some(&path));
-            let (tip, body) = template::render(&path, front, zh).map_err(|e| e.to_string())?;
-            state.save_tip_text(&app, tip, &body, "capture").await?
-        }
-        other => other?,
-    };
-    if saved.front.arxiv.is_some() || saved.front.doi.is_some() {
-        let app2 = app.clone();
-        let id = saved.id.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = enrich(&app2, &id).await {
-                log::warn!("auto enrich failed for {id}: {e}");
-            }
-        });
-    }
+    let zh = state.settings().language == Language::Zh;
+    let stem = file_stem(created_at, &front.title);
+    let saved = save_new(&app, &state, &stem, "capture", |path| {
+        template::render(path, front.clone(), zh, true).map_err(|e| e.to_string())
+    })
+    .await?;
+    spawn_enrich(&app, &saved);
     Ok(state.snapshot())
+}
+
+/// A new tip with an arXiv id or DOI fetches its paper in the background.
+fn spawn_enrich(app: &AppHandle, tip: &Tip) {
+    if tip.front.arxiv.is_none() && tip.front.doi.is_none() {
+        return;
+    }
+    let app = app.clone();
+    let id = tip.id.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = enrich(&app, &id).await {
+            log::warn!("auto enrich failed for {id}: {e}");
+        }
+    });
+}
+
+/// Create a tip from the full form. A body left blank gets a short skeleton
+/// for the kind; the commented key reference is not written, since the form
+/// already shows every key.
+#[tauri::command]
+pub async fn create_tip_full(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    edit: TipEdit,
+) -> Result<BoardState, String> {
+    let zh = state.settings().language == Language::Zh;
+    let created_at = now();
+    let (front, body) = form_tip(edit, created_at, zh)?;
+    let stem = file_stem(created_at, &front.title);
+    let saved = save_new(&app, &state, &stem, "create", |path| {
+        template::render_with_body(path, front.clone(), &body, zh, false).map_err(|e| e.to_string())
+    })
+    .await?;
+    spawn_enrich(&app, &saved);
+    Ok(state.snapshot())
+}
+
+/// The frontmatter and body of a tip made with the form at `created_at`:
+/// the form validated as an edit of a blank tip, the kind's skeleton when
+/// the body was left blank, and a paper id found in the title or links.
+fn form_tip(
+    edit: TipEdit,
+    created_at: NaiveDateTime,
+    zh: bool,
+) -> Result<(FrontMatter, String), String> {
+    let blank = Tip::from_parts(
+        "new.md",
+        None,
+        FrontMatter {
+            created: Some(format_dt(created_at)),
+            ..Default::default()
+        },
+        String::new(),
+    );
+    let tip = edit::apply(&blank, edit)?;
+    let body = if tip.body.trim().is_empty() {
+        template::body_for_kind(tip.front.kind, zh)
+    } else {
+        tip.body
+    };
+    let mut front = tip.front;
+    (front.arxiv, front.doi) = paper_ids(&front.title, &front.links);
+    Ok((front, body))
+}
+
+/// The paper a new tip names, as quick capture finds it: an arXiv id or DOI
+/// among the title's words, else an arxiv.org or doi.org link. The first
+/// arXiv id wins over any DOI, as `enrich` prefers arXiv too. The title is
+/// left as typed.
+fn paper_ids(title: &str, links: &[String]) -> (Option<String>, Option<String>) {
+    let words: Vec<&str> = title.split_whitespace().collect();
+    let doi_link = |l: &&str| {
+        let lower = l.to_ascii_lowercase();
+        lower.contains("doi.org/") || lower.starts_with("doi:") || lower.starts_with("10.")
+    };
+    let candidates = words
+        .iter()
+        .copied()
+        .map(|w| (w, true))
+        .chain(links.iter().map(|l| (l.trim(), false)));
+    let mut doi = None;
+    for (text, in_title) in candidates {
+        if let Some(id) = capture::arxiv_id(text) {
+            return (Some(id), None);
+        }
+        if doi.is_none() && (in_title || doi_link(&text)) {
+            doi = capture::doi(text);
+        }
+    }
+    (None, doi)
+}
+
+/// `2026-10-01-camera-ready`: the creation date and the title's slug.
+fn file_stem(created_at: NaiveDateTime, title: &str) -> String {
+    format!("{}-{}", created_at.format("%Y-%m-%d"), slugify(title))
+}
+
+/// Write a new tip under a free name built from `stem`. `render` gives the
+/// tip and file text for a path. If another device created the same name
+/// just now, the next free name is taken once.
+async fn save_new(
+    app: &AppHandle,
+    state: &AppState,
+    stem: &str,
+    action: &str,
+    render: impl Fn(&str) -> Result<(Tip, String), String>,
+) -> Result<Tip, String> {
+    let store = state.store()?;
+    let path = capture_name(state, &store, stem, None);
+    let (tip, text) = render(&path)?;
+    match state.save_tip_text(app, tip, &text, action).await {
+        Err(e) if e == FolderError::Exists(path.clone()).to_string() => {
+            let path = capture_name(state, &store, stem, Some(&path));
+            let (tip, text) = render(&path)?;
+            state.save_tip_text(app, tip, &text, action).await
+        }
+        other => other,
+    }
 }
 
 #[tauri::command]
@@ -561,12 +646,135 @@ mod tests {
     }
 
     #[test]
-    fn hex_colours() {
-        assert!(is_hex_color("#4A3B6B"));
-        assert!(is_hex_color("#abc"));
-        assert!(!is_hex_color("4A3B6B"));
-        assert!(!is_hex_color("#12345"));
-        assert!(!is_hex_color("#GGGGGG"));
+    fn form_tips_find_paper_ids_like_capture() {
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 11, 4)
+            .unwrap()
+            .and_hms_opt(9, 0, 0)
+            .unwrap();
+        let ids = |title: &str, links: &[&str]| {
+            let (front, _) = form_tip(
+                TipEdit {
+                    title: title.into(),
+                    links: links.iter().map(|l| l.to_string()).collect(),
+                    ..Default::default()
+                },
+                at,
+                false,
+            )
+            .unwrap();
+            assert_eq!(front.title, title.trim(), "the title is kept as typed");
+            (front.arxiv, front.doi)
+        };
+        let some = |s: &str| Some(s.to_string());
+        assert_eq!(
+            ids("Read 2401.12345 tonight", &[]),
+            (some("2401.12345"), None)
+        );
+        assert_eq!(
+            ids("Dowell paper 10.1049/piee.1966.0236", &[]),
+            (None, some("10.1049/piee.1966.0236"))
+        );
+        assert_eq!(
+            ids("Attention", &["https://arxiv.org/abs/1706.03762v7"]),
+            (some("1706.03762"), None)
+        );
+        assert_eq!(
+            ids("Loss model", &["https://doi.org/10.1109/TIE.2024.1234567"]),
+            (None, some("10.1109/TIE.2024.1234567"))
+        );
+        // arXiv wins over a DOI, wherever it is.
+        assert_eq!(
+            ids("Paper 10.1/x", &["https://arxiv.org/pdf/2401.00001.pdf"]),
+            (some("2401.00001"), None)
+        );
+        // Other links that merely contain "10.x/" are not DOIs.
+        assert_eq!(
+            ids("Plain task", &["https://example.org/10.1234/page"]),
+            (None, None)
+        );
+        assert_eq!(ids("Buy milk", &[]), (None, None));
+    }
+
+    #[test]
+    fn form_tips_get_a_dated_name_and_a_body() {
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 11, 4)
+            .unwrap()
+            .and_hms_opt(14, 30, 0)
+            .unwrap();
+        let form = TipEdit {
+            title: "  Camera-ready v2 ".into(),
+            kind: Kind::Deadline,
+            due: Some("2026-11-20".into()),
+            remind: vec!["-1d".into()],
+            highlight: vec!["camera".into()],
+            ..Default::default()
+        };
+        let (front, body) = form_tip(form.clone(), at, false).unwrap();
+        assert_eq!(front.title, "Camera-ready v2");
+        assert_eq!(front.created.as_deref(), Some("2026-11-04 14:30"));
+        assert_eq!(front.remind, vec!["-1d"]);
+        assert_eq!(front.highlight, vec!["camera"]);
+        assert_eq!(body, template::body_for_kind(Kind::Deadline, false));
+        assert_eq!(file_stem(at, &front.title), "2026-11-04-camera-ready-v2");
+        // Chinese skeleton, and the user's own text wins over the skeleton.
+        let (_, zh_body) = form_tip(form.clone(), at, true).unwrap();
+        assert_eq!(zh_body, template::body_for_kind(Kind::Deadline, true));
+        let (_, own) = form_tip(
+            TipEdit {
+                body: "My notes\r\nline 2".into(),
+                ..form.clone()
+            },
+            at,
+            false,
+        )
+        .unwrap();
+        assert_eq!(own, "My notes\nline 2");
+        let (_, note) = form_tip(
+            TipEdit {
+                kind: Kind::Note,
+                body: "  \n ".into(),
+                ..form.clone()
+            },
+            at,
+            false,
+        )
+        .unwrap();
+        assert_eq!(note, "");
+        // The form is validated like an edit.
+        assert!(form_tip(
+            TipEdit {
+                title: " ".into(),
+                ..form.clone()
+            },
+            at,
+            false
+        )
+        .is_err());
+        assert!(form_tip(TipEdit { due: None, ..form }, at, false)
+            .unwrap_err()
+            .contains("due date"));
+        // What gets written parses back to the same frontmatter, with no hints.
+        let (front, body) = form_tip(
+            TipEdit {
+                title: "Read Dowell".into(),
+                kind: Kind::Reading,
+                ..Default::default()
+            },
+            at,
+            false,
+        )
+        .unwrap();
+        let (tip, text) = template::render_with_body(
+            "2026-11-04-read-dowell.md",
+            front.clone(),
+            &body,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(tip.front, front);
+        assert!(!text.contains("# ----"), "{text}");
+        assert!(text.contains("## Why read it"), "{text}");
     }
 
     #[test]

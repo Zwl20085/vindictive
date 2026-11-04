@@ -28,6 +28,8 @@ Nothing is copied or moved: tips in the old folder stay where they are. To
 take them with you, copy the `.md` files (and any `figures/`) into the new
 folder yourself, before or after switching.
 
+Settings → **Highlight words**: words or phrases (one per entry) marked on every tile and tip body, ignoring case, on top of each tip's own `highlight:` list.
+
 ## Hotkeys
 
 | Hotkey | Default | Does |

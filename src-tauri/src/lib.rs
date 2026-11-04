@@ -100,6 +100,7 @@ pub fn run() {
             commands::update_tip,
             commands::fit_window,
             commands::create_tip,
+            commands::create_tip_full,
             commands::save_settings,
             commands::fetch_image,
             commands::enrich_tip,

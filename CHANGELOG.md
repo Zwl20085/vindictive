@@ -11,6 +11,18 @@ conventional-commit history; the version a commit shipped in is the first
 
 ### Added
 
+- Full new-tip form: "More…" (or Ctrl+Enter) on the add bar opens the Edit
+  form prefilled from the capture line; an empty body gets a short skeleton
+  for the tip's kind, and form-created files carry no commented key block.
+  arXiv ids and DOIs in the title or links start the metadata lookup as
+  quick capture does.
+- The Edit form now covers every frontmatter key: remind, repeat, links,
+  images, colour (with a picker), size and highlight, under a collapsible
+  "More" section. Fields left untouched keep the file's exact text.
+- Keyword highlighting: a tip's `highlight:` list and a global "Highlight
+  words" setting mark matching words on the tile title and in the detail;
+  the body also marks dates, times, `#tags`, URLs and urgency words
+  (TODO, ASAP, URGENT, BLOCKED, 紧急…) automatically.
 - `npm run bump -- <version>` (`scripts/bump-version.mjs`) sets the version in
   `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` and both
   lockfiles in one go.

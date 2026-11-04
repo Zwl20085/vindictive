@@ -23,6 +23,7 @@ images:
 repeat: weekly on mon at 10:00   # daily | weekdays | weekly on mon,thu | monthly on 1 | yearly on 03-15
 color: "#FF0097"                 # optional tile colour override
 size: md                         # optional tile size override: sm | md | wide
+highlight: [camera-ready, ORCID] # words or phrases to mark on the tile and in the body
 order: 2.5                       # optional manual position, written by drag and drop
 arxiv: '2401.12345'              # quoted, see below; or
 doi: 10.1109/TIE.2024.1234567
@@ -68,6 +69,20 @@ read and never written to the file; fix the frontmatter and they disappear.
 - `order` is a number; tiles with an `order` are placed by it, the rest by
   score.
 
+## Highlight words
+
+`highlight` is a list of words or phrases (a single value is a one-item
+list). Each one is marked with a flat highlight wherever it appears in the
+tile's subtitle and in the body. Matching ignores case. The global list in
+Settings → **Highlight words** applies to every tip, on top of the tip's own
+list. Entries saved from the app are trimmed, duplicates (ignoring case) and
+blank entries are dropped, and each must be 2 to 64 characters, at most 32
+of them.
+
+```yaml
+highlight: [rebuttal, Reviewer 2]
+```
+
 ## The `paper` block
 
 Written by the app after an arXiv or Crossref lookup, but you can write it
@@ -103,6 +118,12 @@ example body (checklist, figure, links). Edit or delete what you do not
 need. The comments last until the app rewrites the file (Done, snooze, or
 when the file is modified); by then they have done their job.
 
+A tip created with the full new-tip form gets no commented reference (the
+form already shows every key). Its body is what you typed, or, if you left
+it blank, a short skeleton for its kind: a checklist line for a task,
+"What is due" and a checklist for a deadline, "Why read it / Key claims /
+Notes" for reading, "Agenda / Notes" for an event, and nothing for a note.
+
 ## Keys the app writes
 
 | Key             | Written when                                              |
@@ -111,7 +132,7 @@ when the file is modified); by then they have done their job.
 | `due`, `remind` | you press **Done** on a recurring tip (rolled forward)    |
 | `snoozed_until` | you press **Snooze**                                      |
 | `paper`         | arXiv / Crossref metadata was fetched                     |
-| `created`       | the tip was made with quick capture                       |
+| `created`       | the tip was made with quick capture or the new-tip form   |
 | `color`, `size` | you pick a swatch or size in the tile's detail view       |
 | `order`         | you drag a tile to a new place on the board               |
 

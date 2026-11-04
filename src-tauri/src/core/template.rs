@@ -2,8 +2,10 @@
 //! reference of every optional key that was not set, and an example body.
 //! The comments survive until the app rewrites the file (Done, snooze, a
 //! pushed local edit); by then the user has usually edited past them.
+//! Tips made with the full form get neither: the form already shows every
+//! key, and the body is the form's text or a short skeleton for the kind.
 
-use super::tip::{FrontMatter, Tip, TipError};
+use super::tip::{FrontMatter, Kind, Tip, TipError};
 
 /// Commented examples for keys the capture line did not set.
 fn key_hints(front: &FrontMatter, zh: bool) -> Vec<String> {
@@ -108,11 +110,49 @@ Put files under `figures/`, list them in `images:` above, or embed one inline:
     }
 }
 
-/// Full file text for a new tip, plus the parsed tip the board should hold.
-pub fn render(path: &str, front: FrontMatter, zh: bool) -> Result<(Tip, String), TipError> {
+/// A short Markdown skeleton for a new tip of `kind` made with the form and
+/// left without text. Notes start empty.
+pub fn body_for_kind(kind: Kind, zh: bool) -> String {
+    let text = match (kind, zh) {
+        (Kind::Task, false) => "- [ ] ",
+        (Kind::Task, true) => "- [ ] ",
+        (Kind::Deadline, false) => "## What is due\n\n## Checklist\n- [ ] ",
+        (Kind::Deadline, true) => "## 要交什么\n\n## 清单\n- [ ] ",
+        (Kind::Reading, false) => "## Why read it\n\n## Key claims\n\n## Notes\n",
+        (Kind::Reading, true) => "## 为什么读\n\n## 主要论点\n\n## 笔记\n",
+        (Kind::Event, false) => "## Agenda\n\n## Notes\n",
+        (Kind::Event, true) => "## 议程\n\n## 笔记\n",
+        (Kind::Note, _) => "",
+    };
+    text.to_string()
+}
+
+/// Full file text for a new tip, plus the parsed tip the board should hold:
+/// the example body, and the commented key reference when `hints` is set.
+pub fn render(
+    path: &str,
+    front: FrontMatter,
+    zh: bool,
+    hints: bool,
+) -> Result<(Tip, String), TipError> {
+    render_with_body(path, front, &body(zh), zh, hints)
+}
+
+/// Like `render`, with the given body instead of the example one.
+pub fn render_with_body(
+    path: &str,
+    front: FrontMatter,
+    body: &str,
+    zh: bool,
+    hints: bool,
+) -> Result<(Tip, String), TipError> {
     let yaml = serde_yaml::to_string(&front)?;
-    let hints = key_hints(&front, zh).join("\n");
-    let text = format!("---\n{}{}\n---\n\n{}", yaml, hints, body(zh));
+    let hints = if hints {
+        key_hints(&front, zh).join("\n") + "\n"
+    } else {
+        String::new()
+    };
+    let text = format!("---\n{yaml}{hints}---\n\n{body}");
     let tip = Tip::parse(path, None, &text)?;
     Ok((tip, text))
 }
@@ -132,7 +172,7 @@ mod tests {
 
     #[test]
     fn template_parses_back_to_the_same_frontmatter() {
-        let (tip, text) = render("tips/x.md", front(), false).unwrap();
+        let (tip, text) = render("tips/x.md", front(), false, true).unwrap();
         assert_eq!(tip.front, front());
         assert!(tip.due_at.is_some());
         assert!(text.starts_with("---\n"));
@@ -149,9 +189,50 @@ mod tests {
 
     #[test]
     fn chinese_template() {
-        let (tip, text) = render("tips/y.md", front(), true).unwrap();
+        let (tip, text) = render("tips/y.md", front(), true, true).unwrap();
         assert!(text.contains("## 清单"));
         assert!(text.contains("可选键"));
         assert_eq!(tip.front.title, "Calibrate torque sensor");
+    }
+
+    #[test]
+    fn no_hints_means_no_comment_block() {
+        for zh in [false, true] {
+            let (tip, text) = render("tips/z.md", front(), zh, false).unwrap();
+            assert!(!text.contains("\n# "), "{text}");
+            assert!(
+                text.starts_with("---\ntitle: Calibrate torque sensor\n"),
+                "{text}"
+            );
+            assert_eq!(tip.front, front());
+        }
+        let (tip, text) =
+            render_with_body("tips/z.md", front(), "My own text.\n", false, false).unwrap();
+        assert!(text.ends_with("---\n\nMy own text.\n"), "{text}");
+        assert_eq!(tip.body.trim(), "My own text.");
+        assert_eq!(tip.front, front());
+    }
+
+    #[test]
+    fn kind_bodies() {
+        let kinds = [
+            Kind::Task,
+            Kind::Deadline,
+            Kind::Reading,
+            Kind::Event,
+            Kind::Note,
+        ];
+        for zh in [false, true] {
+            for kind in kinds {
+                let body = body_for_kind(kind, zh);
+                assert_eq!(body.is_empty(), kind == Kind::Note, "{kind:?} zh={zh}");
+                let (tip, _) = render_with_body("tips/k.md", front(), &body, zh, false).unwrap();
+                assert_eq!(tip.body.trim(), body.trim(), "{kind:?}");
+            }
+        }
+        assert_eq!(body_for_kind(Kind::Task, false), "- [ ] ");
+        assert!(body_for_kind(Kind::Deadline, false).contains("## What is due"));
+        assert!(body_for_kind(Kind::Reading, true).contains("## 笔记"));
+        assert!(body_for_kind(Kind::Event, false).starts_with("## Agenda"));
     }
 }

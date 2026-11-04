@@ -6,6 +6,7 @@ use std::path::Path;
 
 use tauri_plugin_global_shortcut::Shortcut;
 
+use crate::core::edit::highlight_words;
 use crate::sync::weather::MAX_LOCATION_CHARS;
 
 pub const MIN_COLUMNS: u32 = 2;
@@ -79,6 +80,9 @@ pub struct Settings {
     /// Look for a new release in the background and say so with a toast.
     /// Installing stays a manual step (tray: "Check for updates…").
     pub auto_update_check: bool,
+    /// Words or phrases highlighted on every tile and body, on top of each
+    /// tip's own `highlight:` list. Same rules as that list.
+    pub highlight_words: Vec<String>,
 }
 
 impl Default for Settings {
@@ -102,6 +106,7 @@ impl Default for Settings {
             fit_height: true,
             window_opacity: 50,
             auto_update_check: true,
+            highlight_words: Vec::new(),
         }
     }
 }
@@ -165,6 +170,7 @@ impl Settings {
         if s.always_on_top && s.always_on_bottom {
             return Err("always on top and always on bottom cannot both be on".into());
         }
+        s.highlight_words = highlight_words(std::mem::take(&mut s.highlight_words))?;
         Ok(s)
     }
 }
@@ -300,6 +306,28 @@ mod tests {
         assert_eq!(s.weather_location, "Nottingham");
         let text = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn highlight_words_default_empty_and_are_cleaned() {
+        let s: Settings = serde_json::from_str(r#"{"folder":"D:/tips"}"#).unwrap();
+        assert!(s.highlight_words.is_empty());
+        let text = serde_json::to_string(&s).unwrap();
+        assert!(text.contains("\"highlight_words\":[]"), "{text}");
+        assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), s);
+        let s: Settings = serde_json::from_str(
+            r#"{"highlight_words":[" deadline ","Deadline","","Reviewer 2"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            s.validated().unwrap().highlight_words,
+            vec!["deadline", "Reviewer 2"]
+        );
+        let short = Settings {
+            highlight_words: vec!["x".into()],
+            ..Default::default()
+        };
+        assert!(short.validated().unwrap_err().contains("too short"));
     }
 
     #[test]
