@@ -9,7 +9,15 @@ conventional-commit history; the version a commit shipped in is the first
 
 ## [Unreleased]
 
-## [0.5.2] - 2026-11-04
+## [0.5.3] - 2026-11-04
+
+0.5.2 was tagged but never published: its release verify job caught a test
+that only fails on a fast runner. 0.5.3 is the same code plus that fix.
+
+### Fixed
+
+- A broken tip file fixed with an equal-length edit inside the same
+  timestamp tick was never re-read; broken files are now retried every 5 s.
 
 ### Fixed
 
@@ -235,8 +243,8 @@ plugin version mismatch. 0.5.1 is the same code plus that fix.
 
 - First release: an always-on-top tile board synced with GitHub.
 
-[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.5.2...HEAD
-[0.5.2]: https://github.com/Zwl20085/vindictive/compare/v0.5.1...v0.5.2
+[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/Zwl20085/vindictive/compare/v0.5.1...v0.5.3
 [0.5.1]: https://github.com/Zwl20085/vindictive/compare/v0.4.0...v0.5.1
 [0.4.0]: https://github.com/Zwl20085/vindictive/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/Zwl20085/vindictive/compare/v0.3.2...v0.3.3
