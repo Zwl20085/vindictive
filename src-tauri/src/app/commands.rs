@@ -11,7 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use super::settings::{Dock, Language, Settings};
 use super::state::{now, AppState, BoardState};
-use super::{editor, windows};
+use super::{editor, hotkeys, windows};
 use crate::core::capture;
 use crate::core::edit::{self, TipEdit};
 use crate::core::template;
@@ -437,8 +437,16 @@ pub async fn save_settings(
     if folder_changed && clean.is_configured() {
         ensure_folder(Path::new(&clean.folder))?;
     }
+    // Hotkeys before the save: one another app owns rejects the whole save
+    // and the old hotkeys stay registered.
+    hotkeys::switch(&app, &previous, &clean)?;
     // Save first: if that fails the board and the old folder stay as they were.
-    state.set_settings(clean.clone())?;
+    if let Err(e) = state.set_settings(clean.clone()) {
+        if let Err(back) = hotkeys::switch(&app, &clean, &previous) {
+            log::warn!("restoring the old hotkeys: {back}");
+        }
+        return Err(e);
+    }
     if folder_changed {
         state.with(|i| i.broken.clear());
         state.replace_board(Default::default());

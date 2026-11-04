@@ -46,16 +46,27 @@ pub fn on_shortcut(app: &AppHandle, fired: &Shortcut) {
 }
 
 /// Register both shortcuts afresh. Each is registered on its own, so one
-/// that fails (taken by another app, say) never costs the other.
-pub fn register_all(app: &AppHandle, settings: &Settings) {
+/// that fails (taken by another app, say) never costs the other; the
+/// failures come back together, naming each hotkey.
+pub fn register_all(app: &AppHandle, settings: &Settings) -> Result<(), String> {
     let gs = app.global_shortcut();
     if let Err(e) = gs.unregister_all() {
         log::warn!("could not clear the old hotkeys: {e}");
     }
+    register_each(settings, |s| gs.register(s).map_err(|e| e.to_string()))
+}
+
+/// Register `settings`' hotkeys through `register`, collecting failures
+/// into one message.
+pub fn register_each(
+    settings: &Settings,
+    mut register: impl FnMut(Shortcut) -> Result<(), String>,
+) -> Result<(), String> {
     let wanted = [
         ("capture hotkey", settings.hotkey.as_str()),
-        ("board hotkey", settings.board_hotkey.as_str()),
+        ("peek hotkey", settings.board_hotkey.as_str()),
     ];
+    let mut failures = Vec::new();
     for (what, text) in wanted {
         let text = text.trim();
         if text.is_empty() {
@@ -63,16 +74,38 @@ pub fn register_all(app: &AppHandle, settings: &Settings) {
         }
         let result = text
             .parse::<Shortcut>()
-            .map_err(|e| format!("bad {what} {text:?}: {e}"))
+            .map_err(|e| format!("the {what} {text} is not a valid combination: {e}"))
             .and_then(|s| {
-                gs.register(s)
-                    .map_err(|e| format!("could not register {what} {text}: {e}"))
+                register(s).map_err(|e| {
+                    format!(
+                        "the {what} {text} could not be registered (another app may own it): {e}"
+                    )
+                })
             });
         match result {
             Ok(()) => log::info!("{what}: {text}"),
-            Err(e) => log::warn!("{e}"),
+            Err(e) => failures.push(e),
         }
     }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+/// Move from `previous`' hotkeys to `next`'s, before the settings are saved.
+/// If any of the new ones cannot be registered, the old ones are put back
+/// and the error names the hotkey, so the save can be rejected.
+pub fn switch(app: &AppHandle, previous: &Settings, next: &Settings) -> Result<(), String> {
+    if previous.hotkey == next.hotkey && previous.board_hotkey == next.board_hotkey {
+        return Ok(());
+    }
+    register_all(app, next).inspect_err(|_| {
+        if let Err(back) = register_all(app, previous) {
+            log::warn!("restoring the old hotkeys: {back}");
+        }
+    })
 }
 
 #[cfg(test)]
@@ -95,6 +128,50 @@ mod tests {
             Some(HotkeyAction::Peek)
         );
         assert_eq!(action_for(&key("Ctrl+Alt+K"), &s), None);
+    }
+
+    #[test]
+    fn registration_failures_name_the_hotkey() {
+        let s = Settings::default();
+        let taken = key("Ctrl+Alt+Shift+Space");
+        let err = register_each(&s, |k| {
+            if k == taken {
+                Err("already registered".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert!(err.contains("peek hotkey Ctrl+Alt+Shift+Space"), "{err}");
+        assert!(!err.contains("capture hotkey"), "{err}");
+    }
+
+    #[test]
+    fn both_hotkeys_are_tried_even_when_one_fails() {
+        let s = Settings::default();
+        let mut tried = 0;
+        let err = register_each(&s, |_| {
+            tried += 1;
+            Err("taken".into())
+        })
+        .unwrap_err();
+        assert_eq!(tried, 2);
+        assert!(err.contains("capture hotkey") && err.contains("peek hotkey"));
+    }
+
+    #[test]
+    fn a_blank_peek_hotkey_registers_only_capture() {
+        let s = Settings {
+            board_hotkey: String::new(),
+            ..Default::default()
+        };
+        let mut tried = Vec::new();
+        assert!(register_each(&s, |k| {
+            tried.push(k);
+            Ok(())
+        })
+        .is_ok());
+        assert_eq!(tried, vec![key("Ctrl+Shift+Space")]);
     }
 
     #[test]

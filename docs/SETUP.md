@@ -35,7 +35,7 @@ Settings → **Highlight words**: words or phrases (one per entry) marked on eve
 | Hotkey | Default | Does |
 | ------ | ------- | ---- |
 | Capture | `Ctrl+Shift+Space` | opens the one-line quick-capture bar |
-| Peek | `Ctrl+Alt+Shift+Space` | lifts the board above other windows; press again or click elsewhere to drop it back |
+| Peek | `Ctrl+Alt+Shift+Space` | lifts the board above other windows; press again, click the tray icon or switch to another app to drop it back (dragging or resizing the lifted board keeps it up) |
 
 Both are global and can be rebound in Settings (**Capture hotkey**, **Peek
 hotkey**). Type a combination such as `Ctrl+Alt+N` and **Save**. The capture

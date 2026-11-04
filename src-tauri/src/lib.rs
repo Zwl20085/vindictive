@@ -17,9 +17,10 @@ use sync::folder;
 pub fn run() {
     tauri::Builder::default()
         // Must be the first plugin: a second launch exits at once and the
-        // running copy shows its board instead.
+        // running copy shows its board instead (lifted, if it lives on the
+        // bottom layer).
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Err(e) = windows::show_main(app) {
+            if let Err(e) = peek::reveal(app) {
                 log::warn!("second launch: {e}");
             }
         }))
@@ -71,15 +72,25 @@ pub fn run() {
         .on_window_event(|window, event| match (window.label(), event) {
             (windows::MAIN, WindowEvent::CloseRequested { api, .. }) => {
                 // Closing the board hides it; the tray keeps the app alive.
+                // A lifted board is dropped back first, so it never comes
+                // back stuck on top.
                 api.prevent_close();
-                peek::forget();
-                let _ = window.hide();
+                if let Err(e) = windows::hide_main(window.app_handle()) {
+                    log::warn!("close: {e}");
+                }
             }
+            (windows::MAIN, WindowEvent::Focused(true)) => peek::on_focus(),
             (windows::MAIN, WindowEvent::Focused(false)) => {
-                peek::on_blur(window.app_handle());
+                peek::on_blur(window.app_handle(), true);
+            }
+            (windows::MAIN, WindowEvent::Moved(_) | WindowEvent::Resized(_)) => {
+                peek::on_interaction();
             }
             (windows::CAPTURE, WindowEvent::Focused(false)) => {
-                let _ = window.hide();
+                windows::on_capture_blur(window.app_handle());
+                // A capture opened over a lifted board hands focus on; if it
+                // went to another app, the peek ends here.
+                peek::on_blur(window.app_handle(), false);
             }
             _ => {}
         })
