@@ -34,6 +34,7 @@ export const SAMPLE_SETTINGS: Settings = {
   fit_height: true,
   window_opacity: Number(query.get('opacity') ?? 100),
   auto_update_check: true,
+  highlight_words: ['Reviewer 2', 'ORCID'],
 };
 
 /** Realistic researcher sample data for browser development. */
@@ -53,6 +54,7 @@ export function sampleTips(now: Date): Tip[] {
       remind_at: [at(now, 4 * DAY_MS)],
       links: ['https://www.iemdc.org/'],
       tags: ['iemdc', 'paper'],
+      highlight: ['EDAS', '250 words'],
       body: '## Abstract checklist\n\n- [x] 250 words\n- [ ] Compare with the 12-slot baseline\n- [ ] Ask co-authors for ORCID\n\nSubmit through the **EDAS** portal.',
     },
     {
@@ -66,6 +68,7 @@ export function sampleTips(now: Date): Tip[] {
       remind_at: [at(now, 6 * HOUR_MS)],
       links: ['https://mc.manuscriptcentral.com/tie'],
       tags: ['tie', 'revision'],
+      highlight: ['12 kHz'],
       body: 'Reviewer 2 wants the thermal model validated at 12 kHz.\n\n![thermal](figures/coil-thermal.png)',
       images: ['figures/coil-thermal.png', 'figures/ac-loss-sweep.svg'],
     },

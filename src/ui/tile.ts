@@ -4,6 +4,7 @@ import { isRelativeSrc } from '../lib/markdown';
 import { countdown, parseNaive } from '../lib/time';
 import { spanFor, tileSize } from '../lib/tileSize';
 import { tileColor } from '../lib/tileColor';
+import { highlightText, wordsFor } from '../lib/highlight';
 import { el } from './dom';
 import { KIND_GLYPH, labelFor } from './glyphs';
 import type { VersionedResolver } from './images';
@@ -21,6 +22,8 @@ export interface TileOptions {
   enterIndex?: number;
   /** Resolves a figure path to something an `<img>` can show (cached per tip sha). */
   resolveImage?: VersionedResolver;
+  /** Global `highlight_words`; joined with the tip's own `highlight` list. */
+  highlightWords?: readonly string[];
 }
 
 /** How long the tilt release runs before the board flips. */
@@ -101,7 +104,7 @@ function thumbnail(tip: Tip, resolve: VersionedResolver | undefined): HTMLElemen
  * same signature can share one DOM node; only the countdown is refreshed
  * (see `updateTile`). A different signature means the tile is rebuilt.
  */
-export function tileSignature(tip: Tip, isNextUp: boolean, now: Date, columns: number): string {
+export function tileSignature(tip: Tip, isNextUp: boolean, now: Date, columns: number, highlightWords: readonly string[] = []): string {
   const size = tileSize(tip, isNextUp, now);
   const [cols, rows] = spanFor(size, columns);
   const colour = tileColor(tip, now);
@@ -120,6 +123,7 @@ export function tileSignature(tip: Tip, isNextUp: boolean, now: Date, columns: n
     colour.fg,
     countdownText(tip, now) !== undefined,
     warningsOf(tip),
+    wordsFor(tip.highlight, highlightWords),
   ]);
 }
 
@@ -128,8 +132,15 @@ export function tileSignature(tip: Tip, isNextUp: boolean, now: Date, columns: n
  * `false` (and changes nothing) when the tile's signature differs, in which
  * case the caller must replace it with a fresh `renderTile`.
  */
-export function updateTile(button: HTMLElement, tip: Tip, isNextUp: boolean, now: Date, columns: number): boolean {
-  if (button.dataset.id !== tip.id || button.dataset.sig !== tileSignature(tip, isNextUp, now, columns)) return false;
+export function updateTile(
+  button: HTMLElement,
+  tip: Tip,
+  isNextUp: boolean,
+  now: Date,
+  columns: number,
+  highlightWords: readonly string[] = [],
+): boolean {
+  if (button.dataset.id !== tip.id || button.dataset.sig !== tileSignature(tip, isNextUp, now, columns, highlightWords)) return false;
   const cd = countdownText(tip, now);
   const label = button.querySelector('.tile-countdown');
   if (label && cd !== undefined && label.textContent !== cd) label.textContent = cd;
@@ -140,7 +151,7 @@ export function updateTile(button: HTMLElement, tip: Tip, isNextUp: boolean, now
 
 /** Build one tile `<button>`. */
 export function renderTile(options: TileOptions): HTMLButtonElement {
-  const { tip, isNextUp, now, columns, onOpen, onMenu, enterIndex, resolveImage } = options;
+  const { tip, isNextUp, now, columns, onOpen, onMenu, enterIndex, resolveImage, highlightWords = [] } = options;
   const size = tileSize(tip, isNextUp, now);
   const [cols, rows] = spanFor(size, columns);
   const colour = tileColor(tip, now);
@@ -157,7 +168,7 @@ export function renderTile(options: TileOptions): HTMLButtonElement {
       className: classes.join(' '),
       type: 'button',
       'data-id': tip.id,
-      'data-sig': tileSignature(tip, isNextUp, now, columns),
+      'data-sig': tileSignature(tip, isNextUp, now, columns, highlightWords),
       'data-warn': warningsOf(tip).length ? String(warningsOf(tip).length) : undefined,
       'aria-label': ariaLabel(tip, cd, isNextUp),
       title: tip.title,
@@ -165,7 +176,8 @@ export function renderTile(options: TileOptions): HTMLButtonElement {
     },
     size === 'sm' ? null : thumbnail(tip, resolveImage),
     topRow(tip, cd, isNextUp),
-    el('span', { className: 'tile-title', text: displayTitle(tip) }),
+    // Keywords only: tiles stay quiet, so no automatic patterns here.
+    el('span', { className: 'tile-title' }, highlightText(displayTitle(tip), { words: wordsFor(tip.highlight, highlightWords), auto: false })),
   );
   button.style.setProperty('--tile-bg', colour.bg);
   button.style.setProperty('--tile-fg', colour.fg);

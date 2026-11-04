@@ -379,3 +379,29 @@
     transition-delay: 0s;
   }
 }
+
+/* Highlights (lib/highlight.ts): a flat tint of the text colour, no radius,
+   no depth. Keywords and dates get the full tint; tags and URLs barely any. */
+mark.hl {
+  color: inherit;
+  background: color-mix(in srgb, currentColor var(--hl-mix), transparent);
+  padding: 0 0.1em;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+mark.hl-tag,
+mark.hl-url {
+  background: color-mix(in srgb, currentColor var(--hl-mix-soft), transparent);
+}
+
+mark.hl-date {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.15em;
+}
+
+/* Urgency words: bold with a 1 px edge underneath (an inset strip, as for tile edges). */
+mark.hl-urgent {
+  font-weight: 700;
+  box-shadow: inset 0 -1px 0 var(--edge);
+}

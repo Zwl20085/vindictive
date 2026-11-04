@@ -238,3 +238,9 @@
     animation-delay: 0s;
   }
 }
+
+/* Keyword highlights on tiles mix the tile's own text colour, so they read on
+   any tile colour (custom ones included). */
+.tile mark.hl {
+  background: color-mix(in srgb, var(--tile-fg) var(--hl-mix), transparent);
+}

@@ -208,3 +208,28 @@ describe('parse warnings on tiles', () => {
     expect(tileFor(grid, 'a').hasAttribute('data-warn')).toBe(false);
   });
 });
+
+describe('highlights on tiles', () => {
+  const withWords = (tips: Tip[], words: string[]): BoardState => {
+    const state = board(tips);
+    return { ...state, settings: { ...state.settings, highlight_words: words } };
+  };
+
+  it('marks the tip and global keywords in the title, with no automatic patterns', () => {
+    const grid = renderBoard(options(withWords([tip('a', { title: 'TODO thesis draft 2026-11-04', highlight: ['draft'] })], ['Thesis'])));
+    const title = tileFor(grid, 'a').querySelector('.tile-title');
+    expect(Array.from(title?.querySelectorAll('mark') ?? []).map((m) => `${m.className}|${m.textContent}`)).toEqual(['hl hl-kw|thesis', 'hl hl-kw|draft']);
+    expect(title?.textContent).toBe('TODO thesis draft 2026-11-04');
+  });
+
+  it('rebuilds a tile when the global words change, and keeps it otherwise', () => {
+    const grid = createBoard();
+    const opts = options(withWords([tip('a', { title: 'thesis' })], []));
+    updateBoard(grid, opts);
+    const before = tileFor(grid, 'a');
+    expect(updateBoard(grid, { ...opts, state: withWords([tip('a', { title: 'thesis' })], []) })).toHaveLength(0);
+    expect(updateBoard(grid, { ...opts, state: withWords([tip('a', { title: 'thesis' })], ['thesis']) })).toHaveLength(1);
+    expect(tileFor(grid, 'a')).not.toBe(before);
+    expect(tileFor(grid, 'a').querySelector('mark.hl-kw')?.textContent).toBe('thesis');
+  });
+});

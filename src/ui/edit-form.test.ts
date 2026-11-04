@@ -1,7 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Tip, TipEdit } from '../types';
 import { setLocale } from '../lib/i18n';
-import { DISCARD_CONFIRM_MS, dueFields, readEditForm, renderEditForm, splitTags, type EditFormActions } from './edit-form';
+import {
+  DISCARD_CONFIRM_MS,
+  dueFields,
+  emptyDraft,
+  pickerColor,
+  readEditForm,
+  readHighlights,
+  renderEditForm,
+  splitLines,
+  splitRemind,
+  splitTags,
+  tipFromDraft,
+  type EditFormActions,
+  type EditFormOptions,
+} from './edit-form';
 
 afterEach(() => setLocale('en'));
 
@@ -22,9 +36,9 @@ const base: Tip = {
   remind_at: [],
 };
 
-function setup(tip: Tip = base, onSave: EditFormActions['onSave'] = vi.fn(async () => undefined)) {
+function setup(tip: Tip = base, onSave: EditFormActions['onSave'] = vi.fn(async () => undefined), mode: EditFormOptions['mode'] = 'edit') {
   const onCancel = vi.fn();
-  const form = renderEditForm({ tip, actions: { onSave, onCancel } });
+  const form = renderEditForm({ tip, actions: { onSave, onCancel }, mode });
   document.body.append(form);
   const field = <T extends HTMLElement>(name: string): T => {
     const node = form.querySelector<T>(`[name="${name}"]`);
@@ -70,6 +84,13 @@ describe('readEditForm', () => {
       due: '2026-10-15',
       location: 'Lab 302',
       tags: ['ecce', 'paper'],
+      remind: [],
+      repeat: null,
+      links: ['https://example.org'],
+      images: [],
+      color: null,
+      size: null,
+      highlight: [],
       body: '\nOld body.\n',
     };
     expect(readEditForm(form)).toEqual(expected);
@@ -202,5 +223,162 @@ describe('renderEditForm', () => {
     setLocale('zh');
     const { form } = setup();
     expect(form.querySelector('.set-title')?.textContent).toBe('编辑事项');
+  });
+});
+
+describe('list helpers', () => {
+  it('splits reminders on commas and spaces, keeping a date and its time together', () => {
+    expect(splitRemind('-1d, -2h 2026-10-13 09:00，2026/10/14 -1d')).toEqual(['-1d', '-2h', '2026-10-13 09:00', '2026/10/14']);
+    expect(splitRemind('  ')).toEqual([]);
+    expect(splitRemind('2026-10-13T09:00')).toEqual(['2026-10-13T09:00']);
+  });
+  it('rejects reminders shaped like neither an offset nor a date, and offsets without a due', () => {
+    expect(() => splitRemind('-1d soon')).toThrow(/soon: not a reminder/);
+    expect(() => splitRemind('09:00')).toThrow(/not a reminder/);
+    expect(() => splitRemind('-1y')).toThrow(/not a reminder/);
+    expect(() => splitRemind('-1d', false)).toThrow(/due date/);
+    expect(splitRemind('2026-10-13 09:00', false)).toEqual(['2026-10-13 09:00']);
+  });
+  it('splits lines and highlight phrases without empty entries', () => {
+    expect(splitLines(' a.png \r\n\n https://x.org/b.svg\n')).toEqual(['a.png', 'https://x.org/b.svg']);
+    expect(readHighlights('Reviewer 2, reviewer 2，ORCID , ')).toEqual(['Reviewer 2', 'ORCID']);
+    expect(() => readHighlights('a, ORCID')).toThrow(/too short/);
+  });
+  it('normalises hex colours for the native picker', () => {
+    expect(pickerColor('#ABC')).toBe('#aabbcc');
+    expect(pickerColor(' #4A3B6B ')).toBe('#4a3b6b');
+    expect(pickerColor('teal')).toBeUndefined();
+    expect(pickerColor('#12345')).toBeUndefined();
+  });
+});
+
+describe('the More fields', () => {
+  const plain: Tip = { ...base, links: undefined };
+  const full: Tip = {
+    ...base,
+    remind: ['-1d', '2026-10-13 09:00'],
+    repeat: 'weekly on mon',
+    links: ['https://a.org', 'https://b.org'],
+    images: ['figures/a.png'],
+    color: '#4A3B6B',
+    size: 'wide',
+    highlight: ['EDAS', '250 words'],
+  };
+  const details = (tip: Tip): HTMLDetailsElement | null => setup(tip).form.querySelector<HTMLDetailsElement>('details.set-more');
+
+  it('stay folded when none has a value and open when one does', () => {
+    expect(details(plain)?.open).toBe(false);
+    expect(details(base)?.open).toBe(true);
+    expect(details({ ...plain, color: '#123456' })?.open).toBe(true);
+  });
+
+  it('are prefilled and read back unchanged', () => {
+    const { form, field } = setup(full);
+    expect(field<HTMLInputElement>('remind').value).toBe('-1d, 2026-10-13 09:00');
+    expect(field<HTMLTextAreaElement>('links').value).toBe('https://a.org\nhttps://b.org');
+    expect(field<HTMLSelectElement>('size').value).toBe('wide');
+    expect(readEditForm(form)).toMatchObject({
+      remind: ['-1d', '2026-10-13 09:00'],
+      repeat: 'weekly on mon',
+      links: ['https://a.org', 'https://b.org'],
+      images: ['figures/a.png'],
+      color: '#4A3B6B',
+      size: 'wide',
+      highlight: ['EDAS', '250 words'],
+    });
+  });
+
+  it('offers repeat suggestions and the size choices', () => {
+    const { form, field } = setup(plain);
+    const list = field<HTMLInputElement>('repeat').getAttribute('list') ?? '';
+    const options = Array.from(form.querySelectorAll<HTMLOptionElement>(`datalist#${list} option`), (o) => o.value);
+    expect(options).toEqual(['daily', 'weekdays', 'weekly on mon', 'monthly on 1', 'yearly on 03-15']);
+    expect(Array.from(field<HTMLSelectElement>('size').options, (o) => o.value)).toEqual(['', 'sm', 'md', 'wide']);
+  });
+
+  it('clears blank fields to null or empty lists', () => {
+    const { form, field } = setup(full);
+    for (const name of ['remind', 'repeat', 'color', 'highlight']) field<HTMLInputElement>(name).value = '  ';
+    for (const name of ['links', 'images']) field<HTMLTextAreaElement>(name).value = '\n \n';
+    field<HTMLSelectElement>('size').value = '';
+    expect(readEditForm(form)).toMatchObject({ remind: [], repeat: null, links: [], images: [], color: null, size: null, highlight: [] });
+  });
+
+  it('rejects a changed colour that is not hex, a bad reminder and an unknown size', () => {
+    const { form, field } = setup(plain);
+    field<HTMLInputElement>('color').value = 'red';
+    expect(() => readEditForm(form)).toThrow(/red: not a colour/);
+    field<HTMLInputElement>('color').value = '#abc';
+    expect(readEditForm(form).color).toBe('#abc');
+    field<HTMLInputElement>('remind').value = '-1d tomorrow';
+    expect(() => readEditForm(form)).toThrow(/tomorrow: not a reminder/);
+    field<HTMLInputElement>('remind').value = '-1d';
+    field<HTMLInputElement>('due_date').value = '';
+    expect(() => readEditForm(form)).toThrow(/due date/);
+    field<HTMLInputElement>('remind').value = '';
+    const size = field<HTMLSelectElement>('size');
+    size.append(new Option('huge', 'huge'));
+    size.value = 'huge';
+    expect(() => readEditForm(form)).toThrow(/size/i);
+  });
+
+  it('lets hand-written values the form would not accept pass when left untouched', () => {
+    const { form } = setup({ ...plain, color: 'teal', remind: ['tomorrow 9am'], size: 'huge' });
+    expect(readEditForm(form)).toMatchObject({ color: 'teal', remind: ['tomorrow', '9am'], size: 'huge' });
+  });
+
+  it('keeps the text box and the native colour picker in sync', () => {
+    const { form, field } = setup(plain);
+    const text = field<HTMLInputElement>('color');
+    const picker = form.querySelector<HTMLInputElement>('input[type="color"]');
+    if (!picker) throw new Error('no picker');
+    expect(picker.dataset.empty).toBe('true');
+    expect(picker.name).toBe('');
+    text.value = '#ABC';
+    text.dispatchEvent(new Event('input'));
+    expect(picker.value).toBe('#aabbcc');
+    expect(picker.dataset.empty).toBe('false');
+    picker.value = '#102030';
+    picker.dispatchEvent(new Event('input'));
+    expect(text.value).toBe('#102030');
+    expect(readEditForm(form).color).toBe('#102030');
+  });
+});
+
+describe('create mode', () => {
+  const draft = { ...emptyDraft(), title: 'Check coil', priority: 'high' as const, tags: ['lab'], due: '2026-10-15 09:30' };
+
+  it('says Create, marks the form as new and reads back the draft', () => {
+    const { form } = setup(tipFromDraft(draft), undefined, 'create');
+    expect(form.dataset.editing).toBe('new');
+    expect(form.querySelector('button[type="submit"]')?.textContent).toBe('Create');
+    expect(form.querySelector('.set-title')?.textContent).toBe('New tip');
+    expect(readEditForm(form)).toEqual(draft);
+  });
+
+  it('reads back a bare-date draft; an empty draft still needs a title', () => {
+    const bare = { ...draft, due: '2026-10-15' };
+    expect(readEditForm(setup(tipFromDraft(bare), undefined, 'create').form)).toEqual(bare);
+    const empty = setup(tipFromDraft(emptyDraft()), undefined, 'create');
+    expect(() => readEditForm(empty.form)).toThrow(/title/);
+  });
+
+  it('compares the dirty check against the prefilled draft', () => {
+    const { onCancel, field } = setup(tipFromDraft(draft), undefined, 'create');
+    const esc = (): void => void field<HTMLInputElement>('title').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    esc();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    field<HTMLInputElement>('location').value = 'Lab 302';
+    esc();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    esc();
+    expect(onCancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('is labelled in Chinese too', () => {
+    setLocale('zh');
+    const { form } = setup(tipFromDraft(draft), undefined, 'create');
+    expect(form.querySelector('button[type="submit"]')?.textContent).toBe('创建');
+    expect(form.querySelector('.set-more-summary')?.textContent).toBe('更多');
   });
 });

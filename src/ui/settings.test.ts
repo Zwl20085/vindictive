@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SAMPLE_SETTINGS } from '../mock/sample-tips';
-import { normaliseShortcut, readSettings, renderSettings, sameShortcut, type SettingsActions } from './settings';
+import { normaliseShortcut, parseHighlightWords, readSettings, renderSettings, sameShortcut, type SettingsActions } from './settings';
 
 const actions: SettingsActions = {
   onSave: vi.fn(async () => undefined),
@@ -139,5 +139,29 @@ describe('select labels', () => {
     const { form } = render();
     const theme = form.querySelector<HTMLSelectElement>('select[name="theme"]');
     expect(Array.from(theme?.options ?? [], (o) => o.textContent)).toEqual(['dark', 'light', 'NERV', 'cobalt', 'paper']);
+  });
+});
+
+describe('highlight words', () => {
+  it('shows the words comma-separated with a hint and reads them back as a list', () => {
+    const { form } = render();
+    const input = form.querySelector<HTMLInputElement>('input[name="highlight_words"]');
+    if (!input) throw new Error('missing highlight_words');
+    expect(input.value).toBe(SAMPLE_SETTINGS.highlight_words.join(', '));
+    expect(form.textContent).toContain('Shown with a mark on tiles and in notes');
+    expect(readSettings(form, SAMPLE_SETTINGS).highlight_words).toEqual(SAMPLE_SETTINGS.highlight_words);
+    input.value = ' Reviewer 2 , reviewer 2，截止日期, ';
+    expect(readSettings(form, SAMPLE_SETTINGS).highlight_words).toEqual(['Reviewer 2', '截止日期']);
+    input.value = '';
+    expect(readSettings(form, SAMPLE_SETTINGS).highlight_words).toEqual([]);
+  });
+  it('rejects a word too short to highlight', () => {
+    const { form } = render();
+    const input = form.querySelector<HTMLInputElement>('input[name="highlight_words"]');
+    if (input) input.value = 'a, ORCID';
+    expect(() => readSettings(form, SAMPLE_SETTINGS)).toThrow(/too short/);
+  });
+  it('parses the list on its own', () => {
+    expect(parseHighlightWords('one,two, two')).toEqual(['one', 'two']);
   });
 });

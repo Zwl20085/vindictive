@@ -193,3 +193,14 @@
     opacity: 0;
   }
 }
+
+/* "More…" opens the full form; quieter than Enter's quick create. */
+.addbar-more {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+
+.addbar-more:hover,
+.addbar-more:focus-visible {
+  color: var(--fg);
+}

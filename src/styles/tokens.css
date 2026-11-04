@@ -32,6 +32,10 @@
   --warn: #c9962b;
   --overlay: rgb(17 17 19 / 0.94);
 
+  /* Highlight marks: a tint of the text colour itself, so they read on any ground. */
+  --hl-mix: 18%;
+  --hl-mix-soft: 10%;
+
   /* Window background opacity (Settings). Backgrounds mix toward transparent; text stays solid. */
   --alpha: 1;
 

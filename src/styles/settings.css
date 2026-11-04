@@ -159,3 +159,99 @@
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 8px;
 }
+
+/* Less common edit fields, folded away: a flat caption row, no disclosure chrome. */
+.set-more {
+  margin: 0;
+  padding: 0;
+}
+
+.set-more-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  user-select: none;
+}
+
+.set-more-summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A plain chevron that turns when open. */
+.set-more-summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--press-ms) ease;
+}
+
+.set-more[open] > .set-more-summary::before {
+  transform: rotate(45deg);
+}
+
+.set-more-summary:hover,
+.set-more-summary:focus-visible {
+  color: var(--fg);
+}
+
+.set-more-summary:focus-visible {
+  outline: 2px solid var(--edge);
+  outline-offset: 1px;
+}
+
+.set-more-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* One-per-line lists are short; the monospace body style stays. */
+.settings textarea.set-lines {
+  min-height: 3.2em;
+}
+
+/* Hex text box with a native swatch square beside it. */
+.set-color-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.set-color-row input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.set-color-picker {
+  flex: 0 0 auto;
+  width: 32px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.set-color-picker::-webkit-color-swatch-wrapper {
+  padding: 4px;
+}
+
+.set-color-picker::-webkit-color-swatch {
+  border: 0;
+}
+
+/* No colour set: an empty square instead of the picker's default black. */
+.set-color-picker[data-empty='true']::-webkit-color-swatch {
+  opacity: 0;
+}

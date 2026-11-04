@@ -184,6 +184,7 @@ function arrange(grid: HTMLElement, nodes: readonly HTMLElement[]): void {
 export function updateBoard(grid: HTMLElement, options: BoardOptions): HTMLElement[] {
   const { state, now, onOpen, onMenu, onAdd, onSetup, onReorder, seen, resolveImage } = options;
   const columns = clampColumns(state.settings.columns);
+  const highlightWords = state.settings.highlight_words ?? [];
   grid.style.setProperty('--cols', String(columns));
   const shared = gridState(grid);
   const existingAdd = Array.from(grid.children).find((c): c is HTMLButtonElement => c.classList.contains('tile-add'));
@@ -207,14 +208,14 @@ export function updateBoard(grid: HTMLElement, options: BoardOptions): HTMLEleme
   const tiles = tips.map((tip) => {
     const isNextUp = tip.id === state.next_up;
     const kept = existing.get(tip.id);
-    if (kept && updateTile(kept, tip, isNextUp, now, columns)) {
+    if (kept && updateTile(kept, tip, isNextUp, now, columns, highlightWords)) {
       seen?.add(tip.id);
       return kept;
     }
     const fresh = !seen || !seen.has(tip.id);
     const enterIndex = fresh ? entering++ : undefined;
     seen?.add(tip.id);
-    const tile = renderTile({ tip, isNextUp, now, columns, onOpen, onMenu, enterIndex, resolveImage });
+    const tile = renderTile({ tip, isNextUp, now, columns, onOpen, onMenu, enterIndex, resolveImage, highlightWords });
     built.push(tile);
     return tile;
   });

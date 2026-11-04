@@ -1,8 +1,14 @@
 /** Immutable UI state container with subscriptions. */
-import type { BoardState, Weather } from '../types';
+import type { BoardState, TipEdit, Weather } from '../types';
 import type { WeatherStatus } from './panel';
 
-export type View = { kind: 'board' } | { kind: 'detail'; id: string } | { kind: 'edit'; id: string } | { kind: 'settings' };
+export type View =
+  | { kind: 'board' }
+  | { kind: 'detail'; id: string }
+  | { kind: 'edit'; id: string }
+  | { kind: 'settings' }
+  /** The full form for a new tip, prefilled from `draft`. */
+  | { kind: 'create'; draft: TipEdit };
 export type SyncStatus = 'ok' | 'syncing' | 'error' | 'idle';
 
 export interface UiState {

@@ -9,7 +9,10 @@ import { el } from './dom';
 import { errorMessage } from './errors';
 
 export interface AddBarActions {
+  /** Enter: quick create from the capture line. */
   onSubmit: (text: string) => Promise<void>;
+  /** "More…" or Ctrl+Enter: open the full form prefilled from the current text. */
+  onExpand: (text: string) => void;
   onCancel: () => void;
 }
 
@@ -23,6 +26,7 @@ export function renderAddBar(actions: AddBarActions): HTMLElement {
     'aria-label': t('addTip'),
   });
   const hint = el('p', { className: 'addbar-hint', text: t('captureHint') });
+  const more = el('button', { className: 'action addbar-more', type: 'button', text: t('moreFields'), title: 'Ctrl+Enter' });
   const cancel = el('button', { className: 'action action-back', type: 'button', text: t('cancel') });
   let busy = false;
 
@@ -48,15 +52,21 @@ export function renderAddBar(actions: AddBarActions): HTMLElement {
     hint.textContent = input.value.trim() ? describeCapture(input.value) || t('captureHint') : t('captureHint');
   });
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') void submit();
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      if (!busy) actions.onExpand(input.value);
+    } else if (event.key === 'Enter') void submit();
     if (event.key === 'Escape') {
       event.stopPropagation();
       actions.onCancel();
     }
   });
+  more.addEventListener('click', () => {
+    if (!busy) actions.onExpand(input.value);
+  });
   cancel.addEventListener('click', actions.onCancel);
 
-  const bar = el('div', { className: 'addbar', role: 'form', 'aria-label': t('addTip') }, el('div', { className: 'addbar-row' }, input, cancel), hint);
+  const bar = el('div', { className: 'addbar', role: 'form', 'aria-label': t('addTip') }, el('div', { className: 'addbar-row' }, input, more, cancel), hint);
   // Focus once the bar is in the document.
   requestAnimationFrame(() => input.focus());
   return bar;

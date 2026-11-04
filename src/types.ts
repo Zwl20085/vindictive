@@ -55,6 +55,8 @@ export interface Tip {
   snoozed_until?: string;
   done_at?: string;
   created?: string;
+  /** Words or phrases to highlight on this tip's tile and body. */
+  highlight?: string[];
 
   /** Markdown body. */
   body: string;
@@ -99,6 +101,8 @@ export interface Settings {
   window_opacity: number;
   /** Look for a new release in the background (toast only, never installs). */
   auto_update_check: boolean;
+  /** Words or phrases highlighted on every tile and body, in addition to a tip's own `highlight`. */
+  highlight_words: string[];
 }
 
 /** The fields of the in-app edit form; see `src-tauri/src/core/edit.rs`. */
@@ -110,6 +114,19 @@ export interface TipEdit {
   due: string | null;
   location: string | null;
   tags: string[];
+  /** Each entry an offset (`-1d`, `-2h`) or a datetime; blank entries dropped. */
+  remind: string[];
+  /** `daily` | `weekdays` | `weekly on mon,thu [at HH:MM]` | `monthly on N` | `yearly on MM-DD`; `null` clears it. */
+  repeat: string | null;
+  links: string[];
+  /** Relative to the tips folder, or an https URL. */
+  images: string[];
+  /** `#rgb` / `#rrggbb`; `null` clears the override. */
+  color: string | null;
+  /** `sm` | `md` | `wide`; `null` clears the override. */
+  size: string | null;
+  /** Words or phrases to highlight for this tip. */
+  highlight: string[];
   /** Markdown body. */
   body: string;
 }
@@ -177,6 +194,9 @@ export interface Commands {
   fit_window: (args: { height: number }) => void;
   /** Quick-capture line, see `core/capture.rs` for the syntax. */
   create_tip: (args: { text: string }) => BoardState;
+  /** Create a tip from the full form. An empty body gets the kind's template body;
+   *  the commented key reference is never written for form-created tips. */
+  create_tip_full: (args: { edit: TipEdit }) => BoardState;
   save_settings: (args: { settings: Settings }) => BoardState;
   /** Resolve an image reference (relative to the tips folder, or an http URL)
    *  to something an `<img>` can display: a data URL or the URL itself. */

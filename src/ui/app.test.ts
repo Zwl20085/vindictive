@@ -189,3 +189,115 @@ describe('App rendering', () => {
     await vi.waitFor(() => expect(root.querySelector('.stage')?.classList.contains('open')).toBe(false));
   });
 });
+
+describe('App highlight words', () => {
+  it('rebuilds an open detail when the highlight words change, not when they stay the same', async () => {
+    await start();
+    const panel = await openDetail('a');
+    const withWords = (words: string[]): BoardState => {
+      const b = board();
+      return { ...b, settings: { ...b.settings, highlight_words: words } };
+    };
+    backend.emit?.(withWords(['coil']));
+    const rebuilt = back().querySelector<HTMLElement>('.detail');
+    expect(rebuilt).not.toBe(panel);
+    backend.emit?.(withWords(['coil']));
+    expect(back().querySelector('.detail')).toBe(rebuilt);
+    backend.emit?.(withWords(['coil', 'ORCID']));
+    expect(back().querySelector('.detail')).not.toBe(rebuilt);
+  });
+});
+
+describe('App create form', () => {
+  const openBar = (): HTMLInputElement => {
+    (front().querySelector('.tile-add') as HTMLElement).click();
+    const input = front().querySelector<HTMLInputElement>('.addbar-input');
+    if (!input) throw new Error('no add bar');
+    return input;
+  };
+  const createForm = (): HTMLFormElement | null => back().querySelector<HTMLFormElement>('.edit-form[data-editing="new"]');
+
+  it('Ctrl+Enter in the add bar opens the full form prefilled from the capture line', async () => {
+    await start();
+    const input = openBar();
+    input.value = 'Check coil #lab !high ^"Lab 302"';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    const form = createForm();
+    expect(form).not.toBeNull();
+    expect(root.querySelector('.stage')?.classList.contains('open')).toBe(true);
+    const value = (name: string): string => form?.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`)?.value ?? '';
+    expect(value('title')).toBe('Check coil');
+    expect(value('tags')).toBe('lab');
+    expect(value('priority')).toBe('high');
+    expect(value('kind')).toBe('task');
+    expect(value('location')).toBe('Lab 302');
+    expect(form?.querySelector('button[type="submit"]')?.textContent).toBe('Create');
+  });
+
+  it('mounts the form once: the tick and board updates keep what is typed', async () => {
+    await start();
+    openBar().value = 'Draft';
+    (front().querySelector('.addbar-more') as HTMLElement).click();
+    const form = createForm();
+    const body = form?.querySelector<HTMLTextAreaElement>('[name="body"]');
+    if (body) body.value = 'typing';
+    vi.advanceTimersByTime(TICK_MS);
+    backend.emit?.(board([tip('a'), tip('b'), tip('c')]));
+    expect(createForm()).toBe(form);
+    expect(body?.value).toBe('typing');
+  });
+
+  it('saves through create_tip_full, closes the add bar and focuses the new tile', async () => {
+    await start();
+    const created = tip('new-one', { title: 'Brand new' });
+    const createFull = vi.fn(async (_args: unknown) => board([tip('a'), tip('b'), created]));
+    backend.handlers.create_tip_full = createFull;
+    const quick = vi.fn(async () => board());
+    backend.handlers.create_tip = quick;
+    openBar().value = 'Brand new';
+    (front().querySelector('.addbar-more') as HTMLElement).click();
+    createForm()?.requestSubmit();
+    await vi.waitFor(() => expect(root.querySelector('.stage')?.classList.contains('open')).toBe(false));
+    expect(createFull).toHaveBeenCalledTimes(1);
+    expect(quick).not.toHaveBeenCalled();
+    expect(createFull.mock.calls[0]?.[0]).toMatchObject({ edit: { title: 'Brand new', kind: 'task', priority: 'normal', tags: [], remind: [] } });
+    expect(front().querySelector('.addbar')).toBeNull();
+    expect(document.activeElement).toBe(tile('new-one'));
+  });
+
+  it('keeps the form open with the error inline when creating fails', async () => {
+    await start();
+    backend.handlers.create_tip_full = async () => {
+      throw new Error('folder is read-only');
+    };
+    openBar().value = 'Will fail';
+    (front().querySelector('.addbar-more') as HTMLElement).click();
+    const form = createForm();
+    form?.requestSubmit();
+    await vi.waitFor(() => expect(form?.querySelector('.set-status')?.textContent).toMatch(/read-only/));
+    expect(createForm()).toBe(form);
+    expect(root.querySelector('.stage')?.classList.contains('open')).toBe(true);
+  });
+
+  it('Esc on an untouched form returns to the board with the add bar text intact', async () => {
+    await start();
+    const input = openBar();
+    input.value = 'Keep me';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    createForm()?.querySelector('[name="title"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.stage')?.classList.contains('open')).toBe(false);
+    expect(front().querySelector('.addbar-input')).toBe(input);
+    expect(input.value).toBe('Keep me');
+  });
+
+  it('plain Enter in the add bar still quick-creates through create_tip', async () => {
+    await start();
+    const quick = vi.fn(async () => board());
+    backend.handlers.create_tip = quick;
+    const input = openBar();
+    input.value = 'Quick one';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.waitFor(() => expect(quick).toHaveBeenCalledWith({ text: 'Quick one' }));
+    expect(createForm()).toBeNull();
+  });
+});

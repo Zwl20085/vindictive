@@ -3,6 +3,7 @@
  * outside Tauri. Every mutation produces new arrays; nothing is mutated.
  */
 import type { BoardState, Commands, Events, Settings, Tip, TipEdit, Weather } from '../types';
+import { parseCapture } from '../lib/capture-hint';
 import { MINUTE_MS, parseNaive, toNaive } from '../lib/time';
 import { urgencyOf } from '../lib/urgency';
 import { SAMPLE_SETTINGS, sampleTips } from './sample-tips';
@@ -107,69 +108,95 @@ function slug(text: string): string {
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 const dateOnly = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const FULL_WIDTH: Record<string, string> = { '＃': '#', '！': '!', '＠': '@', '＾': '^', '＞': '>' };
-const CAPTURE_KINDS: Record<string, Tip['kind']> = {
-  task: 'task',
-  deadline: 'deadline',
-  due: 'deadline',
-  note: 'note',
-  reading: 'reading',
-  read: 'reading',
-  paper: 'reading',
-  event: 'event',
-  meeting: 'event',
-};
-const CAPTURE_TIME_RE = /^\d{1,2}:\d{2}$/;
 
-/** `@today`, `@tomorrow`, `@2026-10-15` (or with slashes) as a date; `undefined` otherwise. */
-function captureDate(word: string, now: Date): Date | undefined {
-  const w = word.toLowerCase();
-  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (w === 'today' || w === 'tod') return day;
-  if (w === 'tomorrow' || w === 'tom' || w === 'tmr') return new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
-  if (w === 'nextweek') return new Date(day.getFullYear(), day.getMonth(), day.getDate() + 7);
-  const m = /^(\d{4})[-/](\d{2})[-/](\d{2})$/.exec(word);
-  return m ? parseNaive(`${m[1]}-${m[2]}-${m[3]}`) : undefined;
+/** `YYYY-MM-DD` (end of day) or `YYYY-MM-DD HH:MM` as a naive timestamp. */
+function resolveDue(due: string | undefined): string | undefined {
+  if (!due) return undefined;
+  const at = parseNaive(/\d:\d{2}/.test(due) ? due : `${due}${END_OF_DAY}`);
+  return at ? toNaive(at) : undefined;
 }
 
-/**
- * A small subset of `core/capture.rs`: `#tag`, `!high`/`!low`, `>kind`,
- * `@date [HH:MM]` and `^place`; every other word is the title.
- */
-export function parseCaptureText(text: string, now = new Date()): Omit<Tip, 'id' | 'path'> {
-  const title: string[] = [];
-  const tags: string[] = [];
-  let priority: Tip['priority'] = 'normal';
-  let kind: Tip['kind'] = 'task';
-  let due: string | undefined;
-  let location: string | undefined;
-  for (const raw of text.trim().split(/\s+/).filter(Boolean)) {
-    const word = (FULL_WIDTH[raw.charAt(0)] ?? raw.charAt(0)) + raw.slice(1);
-    const rest = word.slice(1);
-    const lower = rest.toLowerCase();
-    const date = word.startsWith('@') ? captureDate(rest, now) : undefined;
-    if (word.startsWith('#') && rest) tags.push(rest);
-    else if (word.startsWith('!') && ['high', 'h', 'low', 'l'].includes(lower)) priority = lower.startsWith('h') ? 'high' : 'low';
-    else if (word.startsWith('>') && CAPTURE_KINDS[lower]) kind = CAPTURE_KINDS[lower];
-    else if (word.startsWith('^') && rest) location = rest.replace(/^["“]|["”]$/g, '');
-    else if (date) due = dateOnly(date);
-    else if (due && !due.includes(' ') && CAPTURE_TIME_RE.test(word)) due = `${due} ${word.padStart(5, '0')}`;
-    else title.push(raw);
+/** Remind entries as timestamps: offsets (`-1d`, `-2h`, `-30m`, `-1w`) count from the due time. */
+function resolveRemind(remind: readonly string[], dueAt: string | undefined): string[] {
+  const due = parseNaive(dueAt);
+  const unit: Record<string, number> = { m: MINUTE_MS, h: 60 * MINUTE_MS, d: 24 * 60 * MINUTE_MS, w: 7 * 24 * 60 * MINUTE_MS };
+  const out: string[] = [];
+  for (const entry of remind) {
+    const offset = /^([-+])(\d+)([mhdw])$/.exec(entry.trim());
+    if (offset) {
+      const sign = offset[1] === '-' ? -1 : 1;
+      if (due) out.push(toNaive(new Date(due.getTime() + sign * Number(offset[2]) * (unit[offset[3] ?? 'm'] ?? MINUTE_MS))));
+      continue;
+    }
+    const at = resolveDue(entry.trim());
+    if (at) out.push(at);
   }
-  const joined = title.join(' ').trim();
-  if (!joined) throw new Error('capture text has no title');
-  const dueAt = due ? parseNaive(due.includes(' ') ? due : `${due}${END_OF_DAY}`) : undefined;
+  return out;
+}
+
+/** The mock's capture parser: `parseCapture` plus the resolved timestamps; throws without a title. */
+export function parseCaptureText(text: string, now = new Date()): Omit<Tip, 'id' | 'path'> {
+  const parsed = parseCapture(text, now);
+  if (!parsed.title) throw new Error('capture text has no title');
   return {
-    title: joined,
-    kind,
-    priority,
+    title: parsed.title,
+    kind: parsed.kind ?? 'task',
+    priority: parsed.priority ?? 'normal',
     status: 'open',
-    tags,
-    due,
-    due_at: dueAt ? toNaive(dueAt) : undefined,
-    location,
+    tags: parsed.tags ?? [],
+    due: parsed.due ?? undefined,
+    due_at: resolveDue(parsed.due ?? undefined),
+    location: parsed.location ?? undefined,
     body: '',
     remind_at: [],
+  };
+}
+
+/** Simple stand-ins for the kind templates in `core/template.rs`. */
+const TEMPLATE_BODIES: Readonly<Record<Tip['kind'], string>> = {
+  task: '## Checklist\n\n- [ ] First step\n- [ ] Second step\n',
+  deadline: '## Before the deadline\n\n- [ ] Draft\n- [ ] Review\n- [ ] Submit\n',
+  note: '## Notes\n\n',
+  reading: '## Summary\n\n## Takeaways\n\n- \n',
+  event: '## Agenda\n\n- \n\n## Bring\n\n- \n',
+};
+
+const COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const SIZES = new Set(['sm', 'md', 'wide']);
+
+/** The `TipEdit` fields as tip fields, checked the way `core/edit.rs` does (fewer checks). */
+function editFields(edit: TipEdit): Omit<Tip, 'id' | 'path' | 'status' | 'remind_at'> & { remind_at: string[] } {
+  const title = edit.title.trim();
+  if (!title) throw new Error('a tip needs a title');
+  const due = edit.due?.trim() || undefined;
+  const dueAt = resolveDue(due);
+  if (due && !dueAt) throw new Error(`"${due}" is not a date; use YYYY-MM-DD, optionally followed by HH:MM`);
+  const color = edit.color?.trim() || undefined;
+  if (color && !COLOR_RE.test(color)) throw new Error(`"${color}" is not a colour; use #rrggbb`);
+  const size = edit.size?.trim() || undefined;
+  if (size && !SIZES.has(size)) throw new Error(`"${size}" is not a tile size; use sm, md or wide`);
+  const list = (values: readonly string[]): string[] | undefined => {
+    const kept = values.map((v) => v.trim()).filter(Boolean);
+    return kept.length ? kept : undefined;
+  };
+  const remind = list(edit.remind);
+  return {
+    title,
+    kind: edit.kind,
+    priority: edit.priority,
+    due,
+    due_at: dueAt,
+    location: edit.location?.trim() || undefined,
+    tags: edit.tags,
+    remind,
+    remind_at: resolveRemind(remind ?? [], dueAt),
+    repeat: edit.repeat?.trim() || undefined,
+    links: list(edit.links),
+    images: list(edit.images),
+    color,
+    size,
+    highlight: list(edit.highlight),
+    body: edit.body,
   };
 }
 
@@ -186,6 +213,14 @@ function createTip(text: string, existing: readonly Tip[]): Tip {
   const parsed = parseCaptureText(text);
   const id = uniqueId(`${toNaive(new Date()).slice(0, 10)}-${slug(parsed.title)}`, existing);
   return { ...parsed, id, path: `${id}.md` };
+}
+
+/** `create_tip_full`: a new tip from the whole form; an empty body gets the kind's template. */
+function createTipFull(edit: TipEdit, existing: readonly Tip[]): Tip {
+  const fields = editFields(edit);
+  const id = uniqueId(`${toNaive(new Date()).slice(0, 10)}-${slug(fields.title)}`, existing);
+  const body = fields.body.trim() ? fields.body : TEMPLATE_BODIES[fields.kind];
+  return { ...fields, body, id, path: `${id}.md`, status: 'open', created: toNaive(new Date()).slice(0, 16).replace('T', ' '), sha: `mock-${++stamps}` };
 }
 
 /**
@@ -221,22 +256,7 @@ function complete(tip: Tip, now: Date): Tip {
 /** The mock's version of `core/edit.rs`: same rules, fewer checks. */
 function applyEdit(tip: Tip, base: string | null, edit: TipEdit): Tip {
   if ((tip.sha ?? null) !== base) throw new Error(`${tip.path} changed on disk since it was loaded; reloaded, please retry`);
-  const title = edit.title.trim();
-  if (!title) throw new Error('a tip needs a title');
-  const due = edit.due?.trim() || undefined;
-  const dueAt = due ? parseNaive(due.includes(':') ? due : `${due}${END_OF_DAY}`) : undefined;
-  if (due && !dueAt) throw new Error(`"${due}" is not a date; use YYYY-MM-DD, optionally followed by HH:MM`);
-  return {
-    ...tip,
-    title,
-    kind: edit.kind,
-    priority: edit.priority,
-    due,
-    due_at: dueAt ? toNaive(dueAt) : undefined,
-    location: edit.location?.trim() || undefined,
-    tags: edit.tags,
-    body: edit.body,
-  };
+  return { ...tip, ...editFields(edit) };
 }
 
 function mockWeather(location: string): Weather {
@@ -264,6 +284,7 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
     return update({ tips: replaceTip(id, (t) => ({ ...t, snoozed_until: until, snoozed_until_at: until })) });
   },
   create_tip: ({ text }) => update({ tips: [createTip(text, store.tips), ...store.tips] }),
+  create_tip_full: ({ edit }) => update({ tips: [createTipFull(edit, store.tips), ...store.tips] }),
   fit_window: () => undefined,
   set_color: ({ id, color }) => update({ tips: replaceTip(id, (t) => ({ ...t, color: color ?? undefined })) }),
   set_order: ({ id, order }) => update({ tips: replaceTip(id, (t) => ({ ...t, order: order ?? undefined })) }),

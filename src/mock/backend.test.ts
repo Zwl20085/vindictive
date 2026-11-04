@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toNaive } from '../lib/time';
+import type { TipEdit } from '../types';
 import { mockInvoke, nextOccurrence, parseCaptureText } from './backend';
 
 const now = new Date(2026, 9, 14, 12, 0, 0); // Wed 14 Oct 2026
@@ -73,5 +74,79 @@ describe('nextOccurrence', () => {
     // Friday → Monday.
     expect(at(nextOccurrence('weekdays', new Date(2026, 9, 16, 9, 0)))).toBe('2026-10-19T09:00:00');
     expect(nextOccurrence('every blue moon', now)).toBeUndefined();
+  });
+});
+
+describe('mock create_tip_full', () => {
+  const edit = (patch: Partial<TipEdit> = {}): TipEdit => ({
+    title: 'Form-made tip',
+    kind: 'event',
+    priority: 'high',
+    due: '2026-10-20 10:00',
+    location: 'Room 4.12',
+    tags: ['group'],
+    remind: ['-1h', '2026-10-19 09:00'],
+    repeat: 'weekly on tue',
+    links: ['https://example.org'],
+    images: ['figures/a.png'],
+    color: '#4A3B6B',
+    size: 'wide',
+    highlight: ['agenda'],
+    body: '',
+    ...patch,
+  });
+
+  it('creates every form field, a template body when empty and a fresh id each time', async () => {
+    const first = await mockInvoke('create_tip_full', { edit: edit() });
+    const second = await mockInvoke('create_tip_full', { edit: edit({ body: 'My own notes' }) });
+    const made = second.tips.filter((t) => t.title === 'Form-made tip');
+    expect(new Set(made.map((t) => t.id)).size).toBe(2);
+    const tip = first.tips.find((t) => t.title === 'Form-made tip');
+    expect(tip).toMatchObject({
+      kind: 'event',
+      priority: 'high',
+      status: 'open',
+      due: '2026-10-20 10:00',
+      due_at: '2026-10-20T10:00:00',
+      location: 'Room 4.12',
+      remind: ['-1h', '2026-10-19 09:00'],
+      remind_at: ['2026-10-20T09:00:00', '2026-10-19T09:00:00'],
+      repeat: 'weekly on tue',
+      links: ['https://example.org'],
+      images: ['figures/a.png'],
+      color: '#4A3B6B',
+      size: 'wide',
+      highlight: ['agenda'],
+    });
+    expect(tip?.body).toMatch(/Agenda/);
+    expect(made.find((t) => t.body === 'My own notes')).toBeDefined();
+  });
+
+  it('rejects what the backend would reject', async () => {
+    await expect(mockInvoke('create_tip_full', { edit: edit({ title: '  ' }) })).rejects.toThrow(/title/);
+    await expect(mockInvoke('create_tip_full', { edit: edit({ color: 'red' }) })).rejects.toThrow(/colour/);
+    await expect(mockInvoke('create_tip_full', { edit: edit({ size: 'huge' }) })).rejects.toThrow(/size/);
+    await expect(mockInvoke('create_tip_full', { edit: edit({ due: 'someday' }) })).rejects.toThrow(/not a date/);
+  });
+
+  it('update_tip writes the new fields too', async () => {
+    const state = await mockInvoke('create_tip_full', { edit: edit({ title: 'To be edited' }) });
+    const tip = state.tips.find((t) => t.title === 'To be edited');
+    if (!tip) throw new Error('not created');
+    const after = await mockInvoke('update_tip', { id: tip.id, base: tip.sha ?? null, edit: edit({ title: 'To be edited', highlight: [], color: null, size: null, links: [] }) });
+    const edited = after.tips.find((t) => t.id === tip.id);
+    expect(edited?.highlight).toBeUndefined();
+    expect(edited?.color).toBeUndefined();
+    expect(edited?.size).toBeUndefined();
+    expect(edited?.links).toBeUndefined();
+    expect(edited?.repeat).toBe('weekly on tue');
+  });
+});
+
+describe('mock sample data', () => {
+  it('shows highlight words in the settings and on two tips', async () => {
+    const state = await mockInvoke('get_state');
+    expect(state.settings.highlight_words.length).toBeGreaterThan(0);
+    expect(state.tips.filter((t) => (t.highlight?.length ?? 0) > 0).length).toBeGreaterThanOrEqual(2);
   });
 });

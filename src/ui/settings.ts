@@ -2,6 +2,7 @@ import type { Dock, Language, Settings, Theme } from '../types';
 import { isLanguage, LOCALES, t, tOr } from '../lib/i18n';
 import { clampColumns, MAX_COLUMNS, MIN_COLUMNS } from './board';
 import { el } from './dom';
+import { readHighlights } from './edit-form';
 import { errorMessage } from './errors';
 
 export const MAX_WEATHER_LOCATION_CHARS = 80;
@@ -88,6 +89,19 @@ export function sameShortcut(a: string, b: string): boolean {
   return normaliseShortcut(a) === normaliseShortcut(b);
 }
 
+/** Same cap as a tip's own `highlight` list (`core/edit.rs`). */
+export const MAX_HIGHLIGHT_WORDS = 32;
+
+/**
+ * Comma-separated highlight words (a word may contain spaces), trimmed and
+ * deduplicated ignoring case, by the same rules as a tip's `highlight`.
+ */
+export function parseHighlightWords(text: string): string[] {
+  const words = readHighlights(text);
+  if (words.length > MAX_HIGHLIGHT_WORDS) throw new Error(`${t('highlightWords')}: ≤ ${MAX_HIGHLIGHT_WORDS}`);
+  return words;
+}
+
 /** Read the form back into a new Settings object, validated. */
 export function readSettings(form: HTMLFormElement, base: Settings): Settings {
   const data = new FormData(form);
@@ -128,6 +142,7 @@ export function readSettings(form: HTMLFormElement, base: Settings): Settings {
     autostart: bool('autostart'),
     notify_new_tips: bool('notify_new_tips'),
     show_done: bool('show_done'),
+    highlight_words: parseHighlightWords(String(data.get('highlight_words') ?? '')),
   };
 }
 
@@ -192,6 +207,8 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
       field(`${t('columns')} (${MIN_COLUMNS}-${MAX_COLUMNS})`, 'columns', text('columns', String(s.columns), 'number')),
       field(t('weatherLocation'), 'weather_location', text('weather_location', s.weather_location, 'text', { placeholder: 'Tokyo', maxlength: String(MAX_WEATHER_LOCATION_CHARS) })),
       field(t('windowOpacity'), 'window_opacity', text('window_opacity', String(s.window_opacity), 'number', { min: String(MIN_WINDOW_OPACITY), max: String(MAX_WINDOW_OPACITY), step: '5' })),
+      field(t('highlightWords'), 'highlight_words', text('highlight_words', (s.highlight_words ?? []).join(', '), 'text', { placeholder: 'Reviewer 2, ORCID', 'aria-describedby': 'set-highlight-hint' })),
+      el('p', { className: 'set-hint', id: 'set-highlight-hint', text: t('highlightWordsHint') }),
       check('show_panel', s.show_panel, t('showPanel')),
       check('fit_height', s.fit_height, t('fitHeight')),
       check('show_done', s.show_done, t('showDoneTiles')),

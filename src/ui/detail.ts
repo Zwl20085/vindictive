@@ -4,6 +4,7 @@ import { countdown, formatLocal, minutesUntilTomorrowMorning, parseNaive } from 
 import { DEADLINE_COLORS, KIND_COLORS, OVERDUE_COLOR, tileColor } from '../lib/tileColor';
 import { TILE_SIZES, tileSize, type TileSize } from '../lib/tileSize';
 import { isRelativeSrc, renderMarkdown, resolveImages, type ImageResolver } from '../lib/markdown';
+import { highlightNode, highlightText, wordsFor } from '../lib/highlight';
 import { el } from './dom';
 import { KIND_GLYPH, labelFor } from './glyphs';
 import type { VersionedResolver } from './images';
@@ -49,13 +50,13 @@ function subtitle(tip: Tip, now: Date): string {
   return due ? `${countdown(due, now, locale())} · ${formatLocal(due, locale())}` : labelFor(tip.kind);
 }
 
-function header(tip: Tip, now: Date): HTMLElement {
+function header(tip: Tip, now: Date, words: readonly string[]): HTMLElement {
   const sub = subtitle(tip, now);
   return el(
     'header',
     { className: 'detail-header' },
     el('span', { className: 'detail-kind' }, el('span', { 'aria-hidden': 'true', text: KIND_GLYPH[tip.kind] }), ` ${labelFor(tip.kind)}`),
-    el('h1', { className: 'detail-title' }, el('span', { className: 'detail-title-text', text: tip.title })),
+    el('h1', { className: 'detail-title' }, el('span', { className: 'detail-title-text' }, highlightText(tip.title, { words, auto: false }))),
     el('p', { className: 'detail-sub', text: sub }),
   );
 }
@@ -72,13 +73,13 @@ function warningsBlock(tip: Tip): HTMLElement | null {
   );
 }
 
-function metaRow(key: string, value: string): HTMLElement {
+function metaRow(key: string, value: string | Node): HTMLElement {
   return el('li', { className: 'detail-meta-row' }, el('span', { className: 'detail-meta-key', text: key }), value);
 }
 
-function metaRows(tip: Tip): HTMLElement | null {
+function metaRows(tip: Tip, words: readonly string[]): HTMLElement | null {
   const rows: HTMLElement[] = [];
-  if (tip.location) rows.push(metaRow(t('where'), tip.location));
+  if (tip.location) rows.push(metaRow(t('where'), highlightText(tip.location, { words, auto: false })));
   if (tip.repeat) rows.push(metaRow(t('repeat'), tip.repeat));
   if (tip.tags?.length) rows.push(metaRow(t('tags'), tip.tags.map((x) => `#${x}`).join(' ')));
   if (tip.snoozed_until_at) {
@@ -245,9 +246,11 @@ function interceptLinks(node: HTMLElement, onOpenLink: (url: string) => void): v
   node.addEventListener('auxclick', handle);
 }
 
-function body(tip: Tip, resolveImage: ImageResolver, onOpenLink: (url: string) => void): HTMLElement {
+function body(tip: Tip, words: readonly string[], resolveImage: ImageResolver, onOpenLink: (url: string) => void): HTMLElement {
   const node = el('article', { className: 'detail-body markdown' });
   node.innerHTML = renderMarkdown(tip.body);
+  // After sanitising: marks are built as nodes, never from HTML strings.
+  highlightNode(node, { words, auto: true });
   interceptLinks(node, onOpenLink);
   node.querySelectorAll('img').forEach((img) => {
     img.decoding = 'async';
@@ -312,7 +315,8 @@ function actionBar(tip: Tip, now: Date, actions: DetailActions, panel: HTMLEleme
 
 /** Render the flipped-open detail panel for one tip. */
 export function renderDetail(options: DetailOptions): HTMLElement {
-  const { tip, now, actions, isNextUp = false } = options;
+  const { tip, settings, now, actions, isNextUp = false } = options;
+  const words = wordsFor(tip.highlight, settings.highlight_words);
   const colour = tileColor(tip, now);
   // Figures are cached per tip version, so an edited image is fetched again.
   const resolve: ImageResolver = (src) => actions.resolveImage(src, tip.sha);
@@ -321,13 +325,13 @@ export function renderDetail(options: DetailOptions): HTMLElement {
   panel.dataset.id = tip.id;
   panel.dataset.sha = tip.sha ?? '';
   panel.append(
-    header(tip, now),
+    header(tip, now, words),
     ...[
       warningsBlock(tip),
-      metaRows(tip),
+      metaRows(tip, words),
       paperBlock(tip, actions.onOpenLink),
       figures(tip, resolve),
-      body(tip, resolve, actions.onOpenLink),
+      body(tip, words, resolve, actions.onOpenLink),
       linksList(tip, actions.onOpenLink),
       tileSection(tip, isNextUp, now, actions),
     ].filter(

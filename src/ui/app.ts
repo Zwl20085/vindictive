@@ -1,6 +1,7 @@
 import { call, isTauri, onBoardUpdated, openExternal } from '../api';
 import type { TileSize } from '../lib/tileSize';
 import type { BoardState, Dock, Settings, Tip, TipEdit } from '../types';
+import { parseCapture } from '../lib/capture-hint';
 import { setLocale, t } from '../lib/i18n';
 import { devClawdMood } from '../lib/mood';
 import { renderAddBar } from './addbar';
@@ -9,7 +10,7 @@ import { createBoard, fitTitles, handleBoardKeys, updateBoard } from './board';
 import { renderChrome } from './chrome';
 import { refreshDetail, renderDetail } from './detail';
 import { el, mount } from './dom';
-import { renderEditForm } from './edit-form';
+import { emptyDraft, renderEditForm, tipFromDraft } from './edit-form';
 import { errorLine, guard, showError, showNotice } from './errors';
 import { cachedResolver, pruneImageCache } from './images';
 import { closeLightbox, isLightboxOpen } from './lightbox';
@@ -46,6 +47,8 @@ export class App {
   private backKey = '';
   /** Tip object behind the shown detail, for tips without a `sha`. */
   private backTip: Tip | undefined;
+  /** Draft behind the mounted create form; a new draft (a new open) remounts it. */
+  private backDraft: TipEdit | undefined;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -155,7 +158,7 @@ export class App {
   private onKey(event: KeyboardEvent): void {
     if (isLightboxOpen()) return; // the lightbox handles Esc itself
     const { view, adding } = this.store.get();
-    if (view.kind === 'edit') return; // the edit form handles Esc and Ctrl+Enter
+    if (view.kind === 'edit' || view.kind === 'create') return; // the form handles Esc and Ctrl+Enter
     const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
     if (event.key === 'Escape' && view.kind !== 'board') {
       this.back_();
@@ -285,6 +288,7 @@ export class App {
       // Leave the content in place for the flip back; the next open re-renders.
       this.backKey = '';
       this.backTip = undefined;
+      this.backDraft = undefined;
       return;
     }
     if (view.kind === 'settings') {
@@ -301,6 +305,10 @@ export class App {
       this.renderEdit(board, view.id);
       return;
     }
+    if (view.kind === 'create') {
+      this.renderCreate(view.draft);
+      return;
+    }
     const tip = board.tips.find((t) => t.id === view.id);
     if (!tip) return;
     this.renderDetailFace(tip, board, now);
@@ -308,13 +316,15 @@ export class App {
 
   /**
    * The detail panel is rebuilt only when its tip changed (new `sha`, or a
-   * new object for tips without one), next-up moved, or the language
-   * changed. Otherwise only its countdown is refreshed, so scroll position,
+   * new object for tips without one), next-up moved, or the language or
+   * the highlight words changed. Otherwise only its countdown is refreshed, so scroll position,
    * an armed delete and running animations survive board updates.
    */
   private renderDetailFace(tip: Tip, board: BoardState, now: Date): void {
     const isNextUp = tip.id === board.next_up;
-    const key = `detail:${tip.id}:${tip.sha ?? ''}:${isNextUp}:${board.settings.language}`;
+    // Highlight words change what the body marks, so a new list rebuilds the panel too.
+    const highlights = (board.settings.highlight_words ?? []).join('\n');
+    const key = `detail:${tip.id}:${tip.sha ?? ''}:${isNextUp}:${board.settings.language}:${highlights}`;
     const mounted = this.back.querySelector<HTMLElement>(':scope > .detail');
     const sameTip = tip.sha ? mounted?.dataset.sha === tip.sha : this.backTip === tip;
     if (mounted && this.backKey === key && sameTip) {
@@ -342,6 +352,43 @@ export class App {
     this.backKey = `edit:${id}`;
     this.backTip = undefined;
     mount(this.back, renderEditForm({ tip, actions: this.editActions(tip) }));
+  }
+
+  /** The create form: mounted once per opening, like the edit form, so nothing typed is lost. */
+  private renderCreate(draft: TipEdit): void {
+    const mounted = this.back.querySelector<HTMLElement>('.edit-form');
+    if (mounted?.dataset.editing === 'new' && this.backKey === 'create' && this.backDraft === draft) return;
+    this.backKey = 'create';
+    this.backTip = undefined;
+    this.backDraft = draft;
+    const form = renderEditForm({ tip: tipFromDraft(draft), mode: 'create', actions: this.createActions() });
+    mount(this.back, form);
+    form.querySelector<HTMLInputElement>('[name="title"]')?.focus({ preventScroll: true });
+  }
+
+  /** The full form for a new tip, prefilled from the add bar's text. */
+  private expand(text: string): void {
+    this.store.set({ view: { kind: 'create', draft: { ...emptyDraft(), ...parseCapture(text) } } });
+  }
+
+  private createActions() {
+    return {
+      // Not through `mutate`: like the edit form, a failure stays in the form
+      // (shown inline, text kept) instead of only on the error line.
+      onSave: async (edit: TipEdit) => {
+        const before = new Set(this.store.get().board?.tips.map((t) => t.id));
+        this.applyBoard(await call('create_tip_full', { edit }));
+        const tips = this.store.get().board?.tips ?? [];
+        const created = tips.find((t) => !before.has(t.id) && t.title === edit.title) ?? tips.find((t) => t.title === edit.title);
+        this.store.set({ view: { kind: 'board' }, adding: false });
+        if (created) this.focusTile(created.id);
+      },
+      // Back to the board with the add bar and its text as they were.
+      onCancel: () => {
+        this.store.set({ view: { kind: 'board' } });
+        this.front.querySelector<HTMLInputElement>('.addbar-input')?.focus();
+      },
+    };
   }
 
   private editActions(tip: Tip) {
@@ -394,6 +441,7 @@ export class App {
         this.applyBoard(board);
         this.store.set({ adding: false });
       },
+      onExpand: (text: string) => this.expand(text),
       onCancel: () => this.store.set({ adding: false }),
     };
   }

@@ -126,3 +126,37 @@ describe('parse warnings in the detail', () => {
     expect(render(tip({ warnings: [] })).panel.querySelector('.detail-warnings')).toBeNull();
   });
 });
+
+describe('highlights in the detail', () => {
+  function renderWith(t: Tip, words: string[]): HTMLElement {
+    const panel = renderDetail({ tip: t, settings: { ...SAMPLE_SETTINGS, highlight_words: words }, now: NOW, actions: actions() });
+    document.body.append(panel);
+    return panel;
+  }
+  const marks = (node: Element | null): string[] =>
+    Array.from(node?.querySelectorAll('mark') ?? []).map((m) => `${m.className}|${m.textContent}`);
+
+  it('marks keywords and automatic patterns in the body, after sanitising', () => {
+    const panel = renderWith(
+      tip({ highlight: ['thesis'], body: 'TODO: send the Thesis to Ana by 2026-11-04 #grant\n\n`TODO in code`\n\n<img src=x onerror="alert(1)">' }),
+      ['Ana'],
+    );
+    const body = panel.querySelector('.detail-body');
+    expect(marks(body)).toEqual(['hl hl-urgent|TODO', 'hl hl-kw|Thesis', 'hl hl-kw|Ana', 'hl hl-date|2026-11-04', 'hl hl-tag|#grant']);
+    expect(body?.querySelector('code mark')).toBeNull();
+    expect(body?.querySelector('[onerror]')).toBeNull();
+  });
+
+  it('marks only keywords in the title and location', () => {
+    const panel = renderWith(tip({ title: 'TODO thesis 2026-11-04', location: 'Room 2.14, TODO', highlight: ['thesis', 'room'] }), []);
+    expect(marks(panel.querySelector('.detail-title'))).toEqual(['hl hl-kw|thesis']);
+    expect(marks(panel.querySelector('.detail-meta'))).toEqual(['hl hl-kw|Room']);
+    expect(panel.querySelector('.detail-title-text')?.textContent).toBe('TODO thesis 2026-11-04');
+  });
+
+  it('does not mark a link URL inside an anchor', () => {
+    const panel = renderWith(tip({ body: 'See <https://example.org/p> and https://example.org/q' }), []);
+    expect(panel.querySelectorAll('.detail-body a[href]').length).toBeGreaterThan(0);
+    expect(panel.querySelector('.detail-body a mark.hl-url')).toBeNull();
+  });
+});
