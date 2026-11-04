@@ -222,6 +222,8 @@ export interface Events {
   'capture-shown': null;
   /** Fired by the tray menu; the main window should open the settings overlay. */
   'open-settings': null;
+  /** Fired just before the app itself resizes or moves the board; logical px. */
+  'app-sized': { width: number; height: number };
 }
 
 export const WINDOW_MAIN = 'main';

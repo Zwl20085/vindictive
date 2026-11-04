@@ -16,9 +16,28 @@ export function closeMenu(): void {
   openMenu = undefined;
   document.removeEventListener('pointerdown', onOutside, true);
   document.removeEventListener('keydown', onKey, true);
+  window.removeEventListener('blur', onBlur);
   const target = returnTo;
   returnTo = undefined;
   if (wasOpen && target?.isConnected) target.focus();
+}
+
+/** Whether a menu is open: the board's own key handling stands aside meanwhile. */
+export function isMenuOpen(): boolean {
+  return !!openMenu;
+}
+
+/**
+ * Close the open menu if the element it belongs to (its `returnFocus`, e.g. a
+ * tile) has left the document: a board update replaced that tile.
+ */
+export function closeMenuIfOrphaned(): void {
+  if (openMenu && returnTo && !returnTo.isConnected) closeMenu();
+}
+
+/** The window lost focus (another app, a hotkey): a menu left behind would float stale. */
+function onBlur(): void {
+  closeMenu();
 }
 
 function onOutside(event: Event): void {
@@ -60,6 +79,7 @@ function open(menu: HTMLElement, x: number, y: number, returnFocus?: HTMLElement
   returnTo = opener;
   document.addEventListener('pointerdown', onOutside, true);
   document.addEventListener('keydown', onKey, true);
+  window.addEventListener('blur', onBlur);
   (menu.querySelector<HTMLElement>('[tabindex="0"], button, input') ?? null)?.focus();
   return menu;
 }
@@ -130,11 +150,16 @@ export function showMenu(x: number, y: number, items: MenuItem[], returnFocus?: 
     li.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
+        // Handled here: the board must not also act on this key.
+        e.stopPropagation();
         select();
       }
     });
     menu.append(li);
   }
-  menu.addEventListener('keydown', (e) => void roveFocus(menu, e));
+  menu.addEventListener('keydown', (e) => {
+    // A key the menu used must not reach the board's handler on `document`.
+    if (roveFocus(menu, e)) e.stopPropagation();
+  });
   return open(menu, x, y, returnFocus);
 }

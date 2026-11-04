@@ -39,9 +39,11 @@ export class Panel {
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor() {
+    // `deep`: a press anywhere in the panel drags the window (a bare attribute
+    // drags only on the panel's own padding). Clawd opts out to stay clickable.
     this.element = el(
       'section',
-      { className: 'panel', 'aria-label': t('panelLabel'), 'data-tauri-drag-region': true },
+      { className: 'panel', 'aria-label': t('panelLabel'), 'data-tauri-drag-region': 'deep' },
       el('div', { className: 'panel-time' }, el('span', { className: 'panel-clock' }, this.hm, this.sec), this.date),
       this.clawd.element,
       el('div', { className: 'panel-weather' }, el('span', { className: 'panel-now' }, this.glyph, this.temp, this.place), this.detail),

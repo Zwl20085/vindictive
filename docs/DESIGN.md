@@ -129,8 +129,9 @@ The whole board flips to a single detail panel in the tile's colour:
 visual language: title (required), kind, priority, due date plus an optional
 time (blank clears it; a date without a time stays a bare date in the file),
 location, tags (space or comma separated) and the Markdown body. `Ctrl+Enter`
-saves, `Esc` or **Cancel** returns to the detail view, and validation errors
-show inline. With unsaved changes, `Esc` asks for confirmation: a second
+saves, `Esc` or **Cancel** returns to where the edit was opened (the detail
+view, or the board when it came from a tile's context menu; the board too if
+the tip has meanwhile left the folder), and validation errors show inline. With unsaved changes, `Esc` asks for confirmation: a second
 `Esc` within 2 s discards them. The backend command `update_tip` validates again
 (`core/edit.rs`), keeps every other frontmatter key untouched and never
 renames the file (the id is the file name). The form is mounted once: folder
@@ -217,7 +218,11 @@ the form. Saving again after that is a deliberate overwrite.
 - **Fit height** (`fit_height`, on by default): after every board render the
   window height is set to strip + panel + grid, clamped to the monitor's
   work area, and the board re-docks. Beyond that the board scrolls with a
-  4 px scrollbar.
+  4 px scrollbar. A height the user sets by dragging the window edge is kept
+  until the layout changes (number of tiles shown, the view, or the add bar
+  opening or closing); then fitting resumes. Resizes the backend makes itself
+  (startup sizing, dock, fit, clamp) are announced with an `app-sized` event
+  and never count as the user's.
 - **Open in editor** (detail view and tile menu) opens the tip's `.md` file
   in your configured editor (`editor_command` setting: `code` by default; blank means
   the system default app for `.md`). The file is watched; when you save it,
@@ -231,6 +236,8 @@ the form. Saving again after that is a deliberate overwrite.
   notify on new tips, check for updates in the background (on by default)).
   A settings file asking for both layers is repaired on load: on top wins.
   Files from older versions load with the new keys' defaults.
+  With unsaved changes, `Esc` asks for confirmation like the edit form: a
+  second `Esc` within 2 s discards them. **Back** discards without asking.
 - **Hotkeys.** Two global shortcuts, registered independently (one that is
   taken by another app never costs the other) and re-registered when either
   setting changes; they must differ. `hotkey` (default `Ctrl+Shift+Space`)
@@ -255,7 +262,10 @@ the form. Saving again after that is a deliberate overwrite.
 
 Frameless 480×56 bar, centred on the active monitor, dark, one input, hint
 text below showing the syntax. `Enter` creates, `Esc` hides. Shown by the
-global hotkey (default `Ctrl+Shift+Space`).
+global hotkey (default `Ctrl+Shift+Space`). A draft survives the bar hiding
+(losing focus, or the hotkey pressed again): only a successful create or `Esc`
+clears it. When the bar is shown again the draft is selected, so typing
+replaces it while a click or an arrow key keeps it.
 
 ## Data format
 

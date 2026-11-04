@@ -87,6 +87,8 @@ export class Clawd {
     this.sprite.setAttribute('role', 'img');
     this.sprite.removeAttribute('aria-hidden');
     this.sprite.addEventListener('click', () => this.hop());
+    // The panel around him is a deep drag region; he must stay clickable.
+    this.sprite.setAttribute('data-tauri-drag-region', 'false');
     this.walker.append(this.sprite);
     this.element = span('clawd-track');
     this.element.append(this.walker);

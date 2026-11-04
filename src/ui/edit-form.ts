@@ -339,6 +339,27 @@ function fields(tip: Tip): HTMLElement[] {
   ];
 }
 
+/** What the form opened with, per form, for `isEditFormDirty`. */
+const originals = new WeakMap<HTMLFormElement, string>();
+
+function formSnapshot(form: HTMLFormElement): string {
+  return JSON.stringify(Array.from(new FormData(form).entries(), ([k, v]) => [k, String(v)]));
+}
+
+/** The form holds changes a cancel would throw away (unknown forms count as clean). */
+export function isEditFormDirty(form: HTMLFormElement): boolean {
+  const original = originals.get(form);
+  return original !== undefined && formSnapshot(form) !== original;
+}
+
+/** Show `text` as a lasting notice in the form's status line. */
+export function showEditFormNotice(form: HTMLFormElement, text: string): void {
+  const status = form.querySelector<HTMLElement>('.set-status');
+  if (!status) return;
+  status.textContent = text;
+  status.dataset.state = 'error';
+}
+
 /** Render the edit form for `tip` (create mode: a new tip prefilled from it). Esc cancels, Ctrl+Enter saves. */
 export function renderEditForm(options: EditFormOptions): HTMLFormElement {
   const { tip, actions } = options;
@@ -362,8 +383,9 @@ export function renderEditForm(options: EditFormOptions): HTMLFormElement {
   };
   // Everything a cancel would throw away, compared against what the form
   // opened with: the tip, or in create mode the prefilled draft.
-  const snapshot = (): string => JSON.stringify(Array.from(new FormData(form).entries(), ([k, v]) => [k, String(v)]));
+  const snapshot = (): string => formSnapshot(form);
   const original = snapshot();
+  originals.set(form, original);
   let armedUntil = 0;
   let armTimer: ReturnType<typeof setTimeout> | undefined;
   const disarm = (): void => {
@@ -388,8 +410,11 @@ export function renderEditForm(options: EditFormOptions): HTMLFormElement {
     if (armTimer) clearTimeout(armTimer);
     armTimer = setTimeout(disarm, DISCARD_CONFIRM_MS);
   };
+  // One save at a time: `requestSubmit` (Ctrl+Enter) ignores the disabled button.
+  let busy = false;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (busy) return;
     let edit: TipEdit;
     try {
       edit = readEditForm(form);
@@ -397,11 +422,15 @@ export function renderEditForm(options: EditFormOptions): HTMLFormElement {
       report(error);
       return;
     }
+    busy = true;
     save.disabled = true;
     actions
       .onSave(edit)
       .catch(report)
-      .finally(() => (save.disabled = false));
+      .finally(() => {
+        busy = false;
+        save.disabled = false;
+      });
   });
   form.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {

@@ -1,22 +1,22 @@
-import { call, isTauri, onBoardUpdated, openExternal } from '../api';
+import { call, isTauri, on, onBoardUpdated, openExternal } from '../api';
 import type { TileSize } from '../lib/tileSize';
 import type { BoardState, Dock, Settings, Tip, TipEdit } from '../types';
 import { parseCapture } from '../lib/capture-hint';
 import { setLocale, t } from '../lib/i18n';
 import { devClawdMood } from '../lib/mood';
 import { renderAddBar } from './addbar';
-import { showMenu } from './menu';
+import { closeMenuIfOrphaned, isMenuOpen, showMenu } from './menu';
 import { createBoard, fitTitles, handleBoardKeys, updateBoard } from './board';
-import { renderChrome } from './chrome';
+import { renderChrome, updateChrome } from './chrome';
 import { refreshDetail, renderDetail } from './detail';
 import { el, mount } from './dom';
-import { emptyDraft, renderEditForm, tipFromDraft } from './edit-form';
+import { emptyDraft, isEditFormDirty, renderEditForm, showEditFormNotice, tipFromDraft } from './edit-form';
 import { errorLine, guard, showError, showNotice } from './errors';
 import { cachedResolver, pruneImageCache } from './images';
 import { closeLightbox, isLightboxOpen } from './lightbox';
 import { Panel } from './panel';
-import { DEFAULT_WINDOW_OPACITY, renderSettings } from './settings';
-import { Store, type UiState } from './store';
+import { DEFAULT_WINDOW_OPACITY, renderSettings, settingsEscape } from './settings';
+import { Store, type EditOrigin, type UiState } from './store';
 import { tileMenuItems } from './tile-menu';
 
 /** First-load retries while the backend finishes starting. */
@@ -27,6 +27,8 @@ export const STARTUP_RETRY_MS = 150;
 export const TICK_MS = 30_000;
 /** Ask the backend for fresh weather this often (it caches on its own too). */
 export const WEATHER_MS = 20 * 60_000;
+/** How long an `app-sized` announcement explains a following window resize. */
+export const SIZED_GRACE_MS = 1500;
 
 export class App {
   private readonly store = new Store();
@@ -67,10 +69,13 @@ export class App {
     });
     document.addEventListener('keydown', (e) => this.onKey(e));
     await onBoardUpdated((board) => this.applyBoard(board)).catch((e) => showError('event subscription', e));
+    // The backend announces every resize it makes (startup, dock, fit, clamp).
+    await on('app-sized', (size) => this.sizeAnnounced(size.height)).catch((e) => console.warn('Vindictive: app-sized', e));
     await this.loadInitialState();
     this.openFromHash();
     setInterval(() => this.renderFaces(this.store.get()), TICK_MS);
     setInterval(() => void this.loadWeather(true), WEATHER_MS);
+    this.lastSeenHeight = window.innerHeight;
     window.addEventListener('resize', () => this.scheduleFit());
     window.addEventListener('resize', () => this.userResized());
   }
@@ -88,9 +93,19 @@ export class App {
     document.documentElement.dataset.theme = board.settings.theme;
     document.documentElement.style.setProperty('--alpha', String(Math.min(100, Math.max(20, board.settings.window_opacity || DEFAULT_WINDOW_OPACITY)) / 100));
     setLocale(board.settings.language);
-    const view = this.store.get().view;
-    const stillExists = !('id' in view) || board.tips.some((t) => t.id === view.id);
-    this.store.set({ board, sync: board.sync_error ? 'error' : 'ok', view: stillExists ? view : { kind: 'board' } });
+    let view = this.store.get().view;
+    const id = 'id' in view ? view.id : undefined;
+    if (id !== undefined && !board.tips.some((t) => t.id === id)) {
+      // The tip left the folder (deleted, renamed, another PC). A figure of
+      // it must not stay over the board; an edit with unsaved text stays
+      // open with a notice (its save then fails as a conflict), anything
+      // else returns to the board.
+      closeLightbox();
+      const form = view.kind === 'edit' ? this.back.querySelector<HTMLFormElement>('form.edit-form') : null;
+      if (form?.dataset.editing === id && isEditFormDirty(form)) showEditFormNotice(form, t('tipGone'));
+      else view = { kind: 'board' };
+    }
+    this.store.set({ board, sync: board.sync_error ? 'error' : 'ok', view });
     pruneImageCache(new Set(board.tips.map((tip) => tip.sha).filter((sha): sha is string => !!sha)));
     void this.loadWeather(false);
   }
@@ -157,10 +172,17 @@ export class App {
 
   private onKey(event: KeyboardEvent): void {
     if (isLightboxOpen()) return; // the lightbox handles Esc itself
-    const { view, adding } = this.store.get();
+    if (isMenuOpen()) return; // keys belong to the menu, not the board behind it
+    const { view, adding, board } = this.store.get();
     if (view.kind === 'edit' || view.kind === 'create') return; // the form handles Esc and Ctrl+Enter
     const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
     if (event.key === 'Escape' && view.kind !== 'board') {
+      // Settings with unsaved changes: the first Esc only warns, like the edit form.
+      const form = view.kind === 'settings' ? this.back.querySelector<HTMLFormElement>('form.settings:not(.edit-form)') : null;
+      if (form && board && !settingsEscape(form, board.settings)) {
+        event.preventDefault();
+        return;
+      }
       this.back_();
       return;
     }
@@ -178,12 +200,28 @@ export class App {
   /** Right-click menu on a tile: the detail actions without flipping. */
   private tileMenu(id: string, x: number, y: number): void {
     const tip = this.store.get().board?.tips.find((t) => t.id === id);
-    if (tip) showMenu(x, y, tileMenuItems(tip, this.detailActions(), x, y));
+    // Owned by the tile: a board update that replaces it closes the menu.
+    const tile = Array.from(this.front.querySelectorAll<HTMLElement>('.tile[data-id]')).find((node) => node.dataset.id === id);
+    if (tip) showMenu(x, y, tileMenuItems(tip, this.detailActions('board'), x, y), tile);
   }
 
+  /**
+   * The strip is updated in place (focus on the sync square and a click in
+   * progress survive store updates); only a language switch rebuilds it.
+   */
   private renderChrome(state: UiState): void {
     const slot = this.root.querySelector('.chrome-slot');
-    if (slot) mount(slot, renderChrome({ state: state.board, sync: state.sync, actions: this.chromeActions() }));
+    if (!slot) return;
+    const language = state.board?.settings.language ?? 'en';
+    const options = { state: state.board, sync: state.sync, actions: this.chromeActions() };
+    const strip = slot.querySelector<HTMLElement>(':scope > .chrome');
+    if (strip && strip.dataset.lang === language) {
+      updateChrome(strip, options);
+      return;
+    }
+    const fresh = renderChrome(options);
+    fresh.dataset.lang = language;
+    mount(slot, fresh);
   }
 
   private renderPanel(state: UiState): void {
@@ -206,6 +244,8 @@ export class App {
     this.renderFront(state, now);
     this.renderBack(state, now);
     this.stage.classList.toggle('open', !onBoard);
+    closeMenuIfOrphaned();
+    this.noteLayout(state);
     this.fitWindow();
   }
 
@@ -255,23 +295,80 @@ export class App {
 
   private fitTimer: ReturnType<typeof setTimeout> | undefined;
   private lastRequestedHeight = 0;
+  /** Window height at the last resize event, to tell real height changes from width-only ones. */
+  private lastSeenHeight = 0;
+  /** What the fitted height depends on: view kind, add bar, number of tiles shown. */
+  private layoutKey = '';
+  /**
+   * The layout key at which the user resized the window by hand. While the
+   * layout stays the same, fit height leaves their height alone.
+   */
+  private userHeightFor: string | undefined;
+
+  /** Track the layout; a change ends a manual height override. */
+  private noteLayout(state: UiState): void {
+    const tiles = this.front.querySelectorAll(':scope > .board > .tile[data-id]').length;
+    this.layoutKey = `${state.view.kind}|${state.adding}|${tiles}`;
+    if (this.userHeightFor !== undefined && this.userHeightFor !== this.layoutKey) {
+      this.userHeightFor = undefined;
+      this.lastRequestedHeight = 0;
+    }
+  }
 
   /** Ask the backend to size the window to the board (setting `fit_height`). */
   private fitWindow(): void {
     const state = this.store.get();
     if (!state.board?.settings.fit_height || state.view.kind !== 'board') return;
+    if (this.userHeightFor !== undefined) return; // the user chose this height
     const grid = this.front.querySelector<HTMLElement>('.board');
     if (!grid) return;
     const h = (el: Element | null | undefined): number => (el instanceof HTMLElement && !el.hidden ? el.offsetHeight : 0);
-    const height = Math.ceil(h(this.root.querySelector('.chrome')) + h(errorLine()) + h(this.panel.element) + h(this.front.querySelector('.addbar')) + grid.offsetHeight);
+    const bar = this.front.querySelector<HTMLElement>(':scope > .addbar');
+    // offsetHeight leaves out margins; the add bar has a top margin (board.css).
+    const barMargin = bar ? Number.parseFloat(getComputedStyle(bar).marginTop) || 0 : 0;
+    const height = Math.ceil(h(this.root.querySelector('.chrome')) + h(errorLine()) + h(this.panel.element) + h(bar) + barMargin + grid.offsetHeight);
     if (Math.abs(height - window.innerHeight) < 2 || height === this.lastRequestedHeight) return;
     this.lastRequestedHeight = height;
-    void call('fit_window', { height }).catch((error) => console.warn('Vindictive: fit_window', error));
+    void call('fit_window', { height })
+      .then(() => (this.sizingSeen = true))
+      .catch((error) => console.warn('Vindictive: fit_window', error));
   }
 
-  /** A resize that did not come from `fitWindow` lets the next render re-fit. */
+  /** Heights the backend announced (`app-sized`) just before resizing the window itself. */
+  private announcedHeights: { height: number; at: number }[] = [];
+  /**
+   * An `app-sized` or a `fit_window` round-trip has happened. Before that the
+   * window is still being set up (startup sizing), so no resize is the user's.
+   */
+  private sizingSeen = false;
+
+  private sizeAnnounced(height: number): void {
+    this.sizingSeen = true;
+    const now = Date.now();
+    this.announcedHeights = [...this.announcedHeights.filter((a) => now - a.at <= SIZED_GRACE_MS), { height, at: now }];
+  }
+
+  /**
+   * A height change is the user's unless it was announced by the backend
+   * (`app-sized`, within `SIZED_GRACE_MS`), answers our own `fit_window`
+   * request, or comes before any sizing round-trip (startup). A user height is
+   * kept until the layout changes (see `noteLayout`); a programmatic one that
+   * is not our fit (dock, startup sizing) is fitted again.
+   */
   private userResized(): void {
-    if (Math.abs(window.innerHeight - this.lastRequestedHeight) > 2) this.lastRequestedHeight = 0;
+    const height = window.innerHeight;
+    const changed = Math.abs(height - this.lastSeenHeight) > 2;
+    this.lastSeenHeight = height;
+    if (!changed) return;
+    if (this.lastRequestedHeight && Math.abs(height - this.lastRequestedHeight) <= 2) return;
+    const now = Date.now();
+    const announced = this.announcedHeights.some((a) => now - a.at <= SIZED_GRACE_MS && Math.abs(height - a.height) <= 2);
+    if (announced || !this.sizingSeen) {
+      this.lastRequestedHeight = 0;
+      this.fitWindow();
+      return;
+    }
+    this.userHeightFor = this.layoutKey;
   }
 
   /** Re-fit titles after the window stops resizing (the tile unit follows the width). */
@@ -302,7 +399,7 @@ export class App {
       return;
     }
     if (view.kind === 'edit') {
-      this.renderEdit(board, view.id);
+      this.renderEdit(board, view.id, view.from ?? 'detail');
       return;
     }
     if (view.kind === 'create') {
@@ -344,14 +441,15 @@ export class App {
    * countdown tick must not wipe what the user is typing. A change to the
    * file on disk surfaces as a conflict when saving.
    */
-  private renderEdit(board: BoardState, id: string): void {
+  private renderEdit(board: BoardState, id: string, from: EditOrigin): void {
     const mounted = this.back.querySelector<HTMLElement>('.edit-form');
-    if (mounted?.dataset.editing === id && this.backKey === `edit:${id}`) return;
+    const key = `edit:${id}:${from}`;
+    if (mounted?.dataset.editing === id && this.backKey === key) return;
     const tip = board.tips.find((t) => t.id === id);
     if (!tip) return;
-    this.backKey = `edit:${id}`;
+    this.backKey = key;
     this.backTip = undefined;
-    mount(this.back, renderEditForm({ tip, actions: this.editActions(tip) }));
+    mount(this.back, renderEditForm({ tip, actions: this.editActions(tip, from) }));
   }
 
   /** The create form: mounted once per opening, like the edit form, so nothing typed is lost. */
@@ -391,8 +489,14 @@ export class App {
     };
   }
 
-  private editActions(tip: Tip) {
+  /** Save and Cancel return to where the edit was opened: the detail, or the board (tile menu). */
+  private editActions(tip: Tip, from: EditOrigin) {
     const id = tip.id;
+    const leave = (): void => {
+      const exists = this.store.get().board?.tips.some((t) => t.id === id);
+      if (from === 'detail' && exists) this.store.set({ view: { kind: 'detail', id } });
+      else this.back_();
+    };
     // The stamp the form starts from: a newer file on disk is a conflict.
     // After a failed save the form adopts the current stamp, so saving
     // again (as the conflict message suggests) is a deliberate overwrite.
@@ -405,9 +509,9 @@ export class App {
           base = this.store.get().board?.tips.find((t) => t.id === id)?.sha ?? base;
           throw error;
         }
-        this.store.set({ view: { kind: 'detail', id } });
+        leave();
       },
-      onCancel: () => this.store.set({ view: { kind: 'detail', id } }),
+      onCancel: leave,
     };
   }
 
@@ -469,7 +573,8 @@ export class App {
     await this.mutate(() => call('save_settings', { settings }), 'save_settings');
   }
 
-  private detailActions() {
+  /** `from`: where an Edit opened from these actions returns to. */
+  private detailActions(from: EditOrigin = 'detail') {
     return {
       onDone: (id: string) => void this.mutate(() => call('mark_done', { id }), 'mark_done').then((ok) => this.afterLeave(ok)),
       onReopen: (id: string) => void this.mutate(() => call('reopen', { id }), 'reopen'),
@@ -477,7 +582,7 @@ export class App {
       onDelete: (id: string) => void this.mutate(() => call('delete_tip', { id }), 'delete_tip').then((ok) => this.afterLeave(ok)),
       onSetColor: (id: string, color: string | null) => void this.mutate(() => call('set_color', { id, color }), 'set_color'),
       onSetSize: (id: string, size: TileSize | null) => void this.mutate(() => call('set_size', { id, size }), 'set_size'),
-      onEdit: (id: string) => this.store.set({ view: { kind: 'edit', id } }),
+      onEdit: (id: string) => this.store.set({ view: { kind: 'edit', id, from } }),
       onEditLocal: (id: string) =>
         void guard('edit_local', () => call('edit_local', { id })).then((path) => {
           if (path) showNotice(t('openedIn'), path);

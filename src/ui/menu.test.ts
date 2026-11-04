@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { closeMenu, showMenu, showSwatchMenu, type MenuItem } from './menu';
+import { closeMenu, closeMenuIfOrphaned, isMenuOpen, showMenu, showSwatchMenu, type MenuItem } from './menu';
 
 afterEach(() => closeMenu());
 
@@ -116,5 +116,49 @@ describe('context menu keyboard', () => {
     menu.querySelector<HTMLElement>('[role="menuitem"]')?.click();
     expect(document.activeElement).toBe(target);
     target.remove();
+  });
+});
+
+describe('menu ownership of keys and lifetime', () => {
+  it('reports whether a menu is open', () => {
+    expect(isMenuOpen()).toBe(false);
+    showMenu(0, 0, items(2));
+    expect(isMenuOpen()).toBe(true);
+    closeMenu();
+    expect(isMenuOpen()).toBe(false);
+  });
+
+  it('keys the menu handles (arrows, Enter, Space) do not reach handlers on document', () => {
+    const bubble = vi.fn();
+    document.addEventListener('keydown', bubble);
+    try {
+      const menu = showMenu(0, 0, items(3));
+      const li = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+      key(li[0]!, 'ArrowDown');
+      key(li[1]!, 'ArrowUp');
+      key(li[0]!, 'End');
+      key(li[2]!, 'Enter');
+      expect(bubble).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('keydown', bubble);
+    }
+  });
+
+  it('closes when the window loses focus', () => {
+    showMenu(0, 0, items(2));
+    window.dispatchEvent(new Event('blur'));
+    expect(document.querySelector('.menu')).toBeNull();
+    expect(isMenuOpen()).toBe(false);
+  });
+
+  it('closes when the element it belongs to leaves the document, not before', () => {
+    const owner = document.createElement('button');
+    document.body.append(owner);
+    showMenu(0, 0, items(2), owner);
+    closeMenuIfOrphaned();
+    expect(isMenuOpen()).toBe(true);
+    owner.remove();
+    closeMenuIfOrphaned();
+    expect(isMenuOpen()).toBe(false);
   });
 });

@@ -38,6 +38,8 @@ interface GridState {
   ranked: Tip[];
   onReorder?: (id: string, order: number) => void;
   wired: boolean;
+  /** Id of the tile being dragged, if a drag is running. */
+  dragged?: string;
 }
 
 const gridStates = new WeakMap<HTMLElement, GridState>();
@@ -49,6 +51,39 @@ function gridState(grid: HTMLElement): GridState {
     gridStates.set(grid, state);
   }
   return state;
+}
+
+/**
+ * Persist a move and apply it to the local ranking at once, so a second
+ * move made before the backend answers starts from the new position rather
+ * than the old one.
+ */
+function commitMove(state: GridState, id: string, order: number): void {
+  state.ranked = state.ranked.map((tip) => (tip.id === id ? { ...tip, order } : tip));
+  state.onReorder?.(id, order);
+}
+
+/** Drop marks and the dragging class on every tile of `grid`. */
+function clearDragMarks(grid: HTMLElement): void {
+  grid.querySelectorAll('.tile-drop-before, .tile-drop-after').forEach((t) => t.classList.remove('tile-drop-before', 'tile-drop-after'));
+}
+
+/** Reset of the grid whose drag is running; `document` listeners call it. */
+let endActiveDrag: (() => void) | undefined;
+let documentWired = false;
+
+/**
+ * A tile replaced mid-drag (a board update) is detached, so its `dragend`
+ * never bubbles to the grid. `document` still sees a drop anywhere in the
+ * window, and the source node's own listener (attached at dragstart) still
+ * hears `dragend`; either one ends the drag.
+ */
+function wireDocumentDragEnd(): void {
+  if (documentWired) return;
+  documentWired = true;
+  const end = (): void => endActiveDrag?.();
+  document.addEventListener('dragend', end);
+  document.addEventListener('drop', end);
 }
 
 export function clampColumns(value: number | undefined): number {
@@ -74,38 +109,46 @@ function wireDragAndDrop(grid: HTMLElement): void {
   const state = gridState(grid);
   if (state.wired) return;
   state.wired = true;
-  let dragged: string | undefined;
+  wireDocumentDragEnd();
   const tiles = (): HTMLElement[] => Array.from(grid.querySelectorAll<HTMLElement>('.tile:not(.tile-add)'));
-  const clearMarks = (): void => tiles().forEach((t) => t.classList.remove('tile-drop-before', 'tile-drop-after'));
+  const reset = (): void => {
+    clearDragMarks(grid);
+    grid.querySelectorAll('.tile-dragging').forEach((t) => t.classList.remove('tile-dragging'));
+    state.dragged = undefined;
+    if (endActiveDrag === reset) endActiveDrag = undefined;
+  };
   const target = (event: DragEvent): { tile: HTMLElement; after: boolean } | undefined => {
     const tile = (event.target as HTMLElement | null)?.closest<HTMLElement>('.tile:not(.tile-add)');
-    if (!tile || tile.dataset.id === dragged) return undefined;
+    if (!tile || tile.dataset.id === state.dragged) return undefined;
     const rect = tile.getBoundingClientRect();
     return { tile, after: event.clientX > rect.left + rect.width / 2 };
   };
   grid.addEventListener('dragstart', (event) => {
     const tile = (event.target as HTMLElement | null)?.closest<HTMLElement>('.tile:not(.tile-add)');
     if (!tile?.dataset.id) return;
-    dragged = tile.dataset.id;
+    state.dragged = tile.dataset.id;
+    endActiveDrag = reset;
     tile.classList.add('tile-dragging');
-    event.dataTransfer?.setData('text/plain', dragged);
+    // Heard even after a board update has detached this node.
+    tile.addEventListener('dragend', reset, { once: true });
+    event.dataTransfer?.setData('text/plain', state.dragged);
     if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
   });
   grid.addEventListener('dragover', (event) => {
-    if (!dragged) return;
+    if (!state.dragged) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    clearMarks();
+    clearDragMarks(grid);
     const t = target(event);
     if (t) t.tile.classList.add(t.after ? 'tile-drop-after' : 'tile-drop-before');
   });
   grid.addEventListener('dragleave', (event) => {
-    if (event.target === grid) clearMarks();
+    if (event.target === grid) clearDragMarks(grid);
   });
   grid.addEventListener('drop', (event) => {
-    if (!dragged) return;
+    if (!state.dragged) return;
     event.preventDefault();
-    const id = dragged;
+    const id = state.dragged;
     const t = target(event);
     const others = tiles().filter((x) => x.dataset.id !== id);
     let index = others.length;
@@ -113,17 +156,11 @@ function wireDragAndDrop(grid: HTMLElement): void {
       const i = others.indexOf(t.tile);
       index = i < 0 ? others.length : i + (t.after ? 1 : 0);
     }
-    clearMarks();
-    grid.querySelector('.tile-dragging')?.classList.remove('tile-dragging');
-    dragged = undefined;
+    reset();
     const order = orderForMove(state.ranked, id, index);
-    if (order !== undefined) state.onReorder?.(id, order);
+    if (order !== undefined) commitMove(state, id, order);
   });
-  grid.addEventListener('dragend', () => {
-    clearMarks();
-    grid.querySelector('.tile-dragging')?.classList.remove('tile-dragging');
-    dragged = undefined;
-  });
+  grid.addEventListener('dragend', reset);
 }
 
 /** The trailing "+" tile. */
@@ -221,6 +258,12 @@ export function updateBoard(grid: HTMLElement, options: BoardOptions): HTMLEleme
   });
   const add = plus();
   arrange(grid, add ? [...tiles, add] : tiles);
+  if (built.length > 0) {
+    // Marks were computed against the old nodes; the next dragover redraws them.
+    clearDragMarks(grid);
+    const dragging = shared.dragged ? built.find((tile) => tile.dataset.id === shared.dragged) : undefined;
+    dragging?.classList.add('tile-dragging');
+  }
 
   // Keys come from the backend ranking (before manual order is applied).
   const shown = new Set(tips.map((tip) => tip.id));
@@ -266,17 +309,16 @@ const STEP: Record<string, (cols: number) => number> = {
  * order (the "+" tile included); Up / Down jump by the column count. Both
  * stop at the ends rather than wrapping. Alt+Arrow on a focused tile moves
  * the tile itself by the same step and persists it through `onReorder`.
+ * Only a focused tile (or the "+" tile) takes the arrows over; otherwise they
+ * scroll the page as usual.
  */
 export function handleBoardKeys(grid: HTMLElement, event: KeyboardEvent): void {
   const step = STEP[event.key];
   if (!step) return;
   const tiles = Array.from(grid.children).filter((c): c is HTMLButtonElement => c instanceof HTMLButtonElement && c.classList.contains('tile'));
   const index = tiles.findIndex((tile) => tile === document.activeElement);
+  if (index < 0) return;
   event.preventDefault();
-  if (index < 0) {
-    tiles[0]?.focus();
-    return;
-  }
   const delta = step(gridColumns(grid));
   if (event.altKey) {
     moveTile(grid, tiles[index], delta);
@@ -298,5 +340,5 @@ function moveTile(grid: HTMLElement, tile: HTMLElement | undefined, delta: numbe
   const to = Math.max(0, Math.min(shown.length - 1, from + delta));
   if (to === from) return;
   const order = orderForMove(state.ranked, id, to);
-  if (order !== undefined) state.onReorder(id, order);
+  if (order !== undefined) commitMove(state, id, order);
 }

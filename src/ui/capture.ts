@@ -66,13 +66,16 @@ export function renderCapture(root: HTMLElement): void {
     }
   };
 
-  input.addEventListener('input', () => {
-    // Typing replaces a saved/error message; its pending reset must not wipe the preview.
+  /** The live preview of what is typed, or the syntax hint when empty. */
+  const showPreview = (): void => {
     if (hintTimer) clearTimeout(hintTimer);
     hintTimer = undefined;
     hint.dataset.state = '';
     hint.textContent = input.value.trim() ? describeCapture(input.value) || t('captureHint') : t('captureHint');
-  });
+  };
+
+  // Typing replaces a saved/error message; its pending reset must not wipe the preview.
+  input.addEventListener('input', showPreview);
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') void submit();
     if (event.key === 'Escape') {
@@ -96,9 +99,12 @@ export function renderCapture(root: HTMLElement): void {
     .catch(() => undefined);
   void on('board-updated', (state) => applyState(state.settings)).catch(() => undefined);
 
+  // A draft survives the bar hiding (blur, or the hotkey pressed again): only
+  // a successful create or Esc clears it. Shown again, the draft is selected,
+  // so typing starts afresh while a click or an arrow key keeps it.
   void on('capture-shown', () => {
-    input.value = '';
-    resetHint();
+    showPreview();
     input.focus();
+    input.select();
   }).catch((error) => console.error('Vindictive: cannot listen for capture-shown', error));
 }

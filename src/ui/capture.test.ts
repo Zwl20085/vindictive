@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const call = vi.fn();
+const listeners = vi.hoisted(() => new Map<string, (payload: unknown) => void>());
 vi.mock('../api', () => ({
   call: (...args: unknown[]) => call(...args),
-  on: vi.fn(async () => () => undefined),
+  on: vi.fn(async (event: string, cb: (payload: unknown) => void) => {
+    listeners.set(event, cb);
+    return () => undefined;
+  }),
 }));
 
 const { HINT_RESET_MS, renderCapture } = await import('./capture');
@@ -67,5 +71,45 @@ describe('capture hint', () => {
     vi.advanceTimersByTime(HINT_RESET_MS + 10);
     expect(hint.textContent).toBe('Check coil · high');
     expect(hint.dataset.state).toBe('');
+  });
+});
+
+describe('capture draft', () => {
+  const shown = (): void => listeners.get('capture-shown')?.(undefined);
+
+  it('keeps the draft when the bar is shown again, selected so typing replaces it', async () => {
+    call.mockImplementation(async () => {
+      throw new Error('offline');
+    });
+    const { input, hint } = setup();
+    await vi.waitFor(() => expect(listeners.has('capture-shown')).toBe(true));
+    input.value = 'Half a thought !high';
+    input.dispatchEvent(new Event('input'));
+    // Hidden on blur, then the hotkey again.
+    input.blur();
+    shown();
+    expect(input.value).toBe('Half a thought !high');
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+    expect(hint.textContent).toBe('Half a thought · high');
+  });
+
+  it('clears the draft after a successful create and on Esc, not otherwise', async () => {
+    call.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_state') throw new Error('offline');
+      return undefined;
+    });
+    const { input } = setup();
+    await vi.waitFor(() => expect(listeners.has('capture-shown')).toBe(true));
+    input.value = 'Saved one';
+    enter(input);
+    await vi.waitFor(() => expect(call).toHaveBeenCalledWith('create_tip', { text: 'Saved one' }));
+    await vi.waitFor(() => expect(input.value).toBe(''));
+    input.value = 'Thrown away';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(input.value).toBe('');
+    shown();
+    expect(input.value).toBe('');
   });
 });

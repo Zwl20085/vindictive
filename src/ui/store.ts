@@ -2,10 +2,13 @@
 import type { BoardState, TipEdit, Weather } from '../types';
 import type { WeatherStatus } from './panel';
 
+/** Where an edit was opened from, and so where Save and Cancel return to. */
+export type EditOrigin = 'board' | 'detail';
+
 export type View =
   | { kind: 'board' }
   | { kind: 'detail'; id: string }
-  | { kind: 'edit'; id: string }
+  | { kind: 'edit'; id: string; from?: EditOrigin }
   | { kind: 'settings' }
   /** The full form for a new tip, prefilled from `draft`. */
   | { kind: 'create'; draft: TipEdit };

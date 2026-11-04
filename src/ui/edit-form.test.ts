@@ -5,6 +5,7 @@ import {
   DISCARD_CONFIRM_MS,
   dueFields,
   emptyDraft,
+  isEditFormDirty,
   pickerColor,
   readEditForm,
   readHighlights,
@@ -136,6 +137,8 @@ describe('renderEditForm', () => {
     form.requestSubmit();
     await vi.waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(vi.mocked(onSave).mock.calls[0]?.[0].title).toBe('Renamed');
+    // Wait for the first save to settle: a submit while one is in flight is ignored.
+    await vi.waitFor(() => expect(form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false));
     field<HTMLTextAreaElement>('body').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
     await vi.waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
     // The title was changed, so the first Esc only arms the discard; the second leaves.
@@ -144,6 +147,29 @@ describe('renderEditForm', () => {
     expect(onCancel).not.toHaveBeenCalled();
     esc();
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores Ctrl+Enter while a save is in flight', async () => {
+    let finish: () => void = () => undefined;
+    const onSave = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const { field } = setup(base, onSave);
+    const ctrlEnter = (): void =>
+      void field<HTMLTextAreaElement>('body').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    ctrlEnter();
+    ctrlEnter();
+    ctrlEnter();
+    expect(onSave).toHaveBeenCalledTimes(1);
+    finish();
+    await vi.waitFor(() => expect(field<HTMLTextAreaElement>('body').form?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false));
+    ctrlEnter();
+    expect(onSave).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports unsaved changes through isEditFormDirty', () => {
+    const { form, field } = setup();
+    expect(isEditFormDirty(form)).toBe(false);
+    field<HTMLInputElement>('title').value = 'changed';
+    expect(isEditFormDirty(form)).toBe(true);
   });
 
   it('cancels on a single Esc when nothing changed, without bubbling to the board', () => {

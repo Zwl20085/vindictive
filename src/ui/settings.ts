@@ -2,7 +2,7 @@ import type { Dock, Language, Settings, Theme } from '../types';
 import { isLanguage, LOCALES, t, tOr } from '../lib/i18n';
 import { clampColumns, MAX_COLUMNS, MIN_COLUMNS } from './board';
 import { el } from './dom';
-import { readHighlights } from './edit-form';
+import { DISCARD_CONFIRM_MS, readHighlights } from './edit-form';
 import { errorMessage } from './errors';
 
 export const MAX_WEATHER_LOCATION_CHARS = 80;
@@ -249,4 +249,58 @@ export function renderSettings(options: SettingsOptions): HTMLElement {
   form.querySelector<HTMLButtonElement>('[data-role="back"]')?.addEventListener('click', actions.onClose);
   exclusiveChecks(form, 'always_on_top', 'always_on_bottom');
   return form;
+}
+
+/** The form's values in a comparable form. */
+function snapshot(form: HTMLFormElement): string {
+  return JSON.stringify(Array.from(new FormData(form).entries(), ([k, v]) => [k, String(v)]));
+}
+
+const NO_ACTIONS: SettingsActions = {
+  onSave: async () => undefined,
+  onPickFolder: async () => null,
+  onOpenFolder: async () => undefined,
+  onClose: () => undefined,
+};
+
+/**
+ * The form differs from `settings`: its current values are compared with
+ * those of a fresh form for `settings`, so both sides go through the same
+ * rendering and nothing reads as changed merely by normalisation.
+ */
+export function isSettingsDirty(form: HTMLFormElement, settings: Settings): boolean {
+  return snapshot(form) !== snapshot(renderSettings({ settings, actions: NO_ACTIONS }) as HTMLFormElement);
+}
+
+/** Per form: until when a second Esc discards, and the timer that disarms. */
+const armed = new WeakMap<HTMLFormElement, { until: number; timer: ReturnType<typeof setTimeout> }>();
+
+/**
+ * Esc in Settings, like the edit form: true (leave) at once when nothing
+ * changed, or on a second Esc within `DISCARD_CONFIRM_MS`; otherwise false,
+ * with a hint in the status line.
+ */
+export function settingsEscape(form: HTMLFormElement, settings: Settings): boolean {
+  const status = form.querySelector<HTMLElement>('.set-status');
+  const disarm = (): void => {
+    const arm = armed.get(form);
+    if (arm) clearTimeout(arm.timer);
+    armed.delete(form);
+    if (status?.dataset.state === 'confirm') {
+      status.textContent = '';
+      status.dataset.state = '';
+    }
+  };
+  const arm = armed.get(form);
+  if (!isSettingsDirty(form, settings) || (arm && Date.now() < arm.until)) {
+    disarm();
+    return true;
+  }
+  if (arm) clearTimeout(arm.timer);
+  armed.set(form, { until: Date.now() + DISCARD_CONFIRM_MS, timer: setTimeout(disarm, DISCARD_CONFIRM_MS) });
+  if (status) {
+    status.textContent = t('discardHint');
+    status.dataset.state = 'confirm';
+  }
+  return false;
 }

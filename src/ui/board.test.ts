@@ -136,8 +136,7 @@ describe('board keys', () => {
 
   it('Left / Right step linearly and stop at the ends', () => {
     const grid = setup(4);
-    press(grid, 'ArrowRight');
-    expect(focusedId()).toBe('0');
+    tileFor(grid, '0').focus();
     press(grid, 'ArrowLeft');
     expect(focusedId()).toBe('0');
     press(grid, 'ArrowRight');
@@ -166,12 +165,52 @@ describe('board keys', () => {
     tileFor(grid, '1').focus();
     press(grid, 'ArrowRight', true);
     expect(onReorder).toHaveBeenCalledWith('1', 2.5);
+    // No board update in between: each move starts where the last one put the tile.
     press(grid, 'ArrowLeft', true);
-    expect(onReorder).toHaveBeenLastCalledWith('1', -1);
+    expect(onReorder).toHaveBeenLastCalledWith('1', 1);
     press(grid, 'ArrowDown', true);
     expect(onReorder).toHaveBeenLastCalledWith('1', 5);
     expect(focusedId()).toBe('1');
   });
+
+  it('two quick Alt+Arrow moves both count, before the backend answers', () => {
+    const onReorder = vi.fn();
+    const grid = setup(5, { onReorder });
+    tileFor(grid, '1').focus();
+    press(grid, 'ArrowRight', true);
+    press(grid, 'ArrowRight', true);
+    // 0 1 2 3 4 -> 0 2 1 3 4 (between 2 and 3) -> 0 2 3 1 4 (between 3 and 4).
+    expect(onReorder.mock.calls).toEqual([
+      ['1', 2.5],
+      ['1', 3.5],
+    ]);
+  });
+
+  it('leaves arrow keys alone (page scroll) when no tile has focus', () => {
+    const grid = setup(3);
+    const outside = document.createElement('input');
+    document.body.append(outside);
+    outside.focus();
+    const event = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+    handleBoardKeys(grid, event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(outside);
+    (document.activeElement as HTMLElement).blur();
+    const again = new KeyboardEvent('keydown', { key: 'ArrowRight', cancelable: true });
+    handleBoardKeys(grid, again);
+    expect(again.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('the "+" tile takes the arrows too', () => {
+    const grid = setup(2);
+    (grid.querySelector('.tile-add') as HTMLElement).focus();
+    const event = new KeyboardEvent('keydown', { key: 'ArrowLeft', cancelable: true });
+    handleBoardKeys(grid, event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(focusedId()).toBe('1');
+  });
+
 
   it('Alt+Arrow at the edge does nothing', () => {
     const onReorder = vi.fn();
@@ -231,5 +270,62 @@ describe('highlights on tiles', () => {
     expect(updateBoard(grid, { ...opts, state: withWords([tip('a', { title: 'thesis' })], ['thesis']) })).toHaveLength(1);
     expect(tileFor(grid, 'a')).not.toBe(before);
     expect(tileFor(grid, 'a').querySelector('mark.hl-kw')?.textContent).toBe('thesis');
+  });
+});
+
+describe('drag and drop', () => {
+  const drag = (target: EventTarget, type: string): Event => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event;
+  };
+
+  it('a tile replaced mid-drag does not leave the drag running', () => {
+    const onReorder = vi.fn();
+    const grid = createBoard();
+    document.body.append(grid);
+    const opts = options(board([tip('a'), tip('b'), tip('c')]), { onReorder });
+    updateBoard(grid, opts);
+    const a = tileFor(grid, 'a');
+    drag(a, 'dragstart');
+    expect(a.classList.contains('tile-dragging')).toBe(true);
+    drag(tileFor(grid, 'b'), 'dragover');
+    // A rescan replaces tile a while it is being dragged: the new node carries the drag look.
+    updateBoard(grid, { ...opts, state: board([tip('a', { sha: 'sha-a2' }), tip('b'), tip('c')]) });
+    expect(tileFor(grid, 'a')).not.toBe(a);
+    expect(tileFor(grid, 'a').classList.contains('tile-dragging')).toBe(true);
+    expect(grid.querySelector('.tile-drop-before, .tile-drop-after')).toBeNull();
+    // Its dragend fires on the detached node: the drag still ends.
+    drag(a, 'dragend');
+    expect(grid.querySelector('.tile-dragging')).toBeNull();
+    // A later drop on the grid is no longer taken for a move.
+    drag(grid, 'drop');
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('a drop anywhere in the document ends the drag', () => {
+    const onReorder = vi.fn();
+    const grid = createBoard();
+    document.body.append(grid);
+    updateBoard(grid, options(board([tip('a'), tip('b')]), { onReorder }));
+    drag(tileFor(grid, 'a'), 'dragstart');
+    drag(document.body, 'drop');
+    expect(grid.querySelector('.tile-dragging')).toBeNull();
+    const over = drag(tileFor(grid, 'b'), 'dragover');
+    expect(over.defaultPrevented).toBe(false);
+  });
+
+  it('a drop applies the new order locally, so a quick Alt+Arrow builds on it', () => {
+    const onReorder = vi.fn();
+    const grid = createBoard();
+    document.body.append(grid);
+    updateBoard(grid, options(board([tip('a'), tip('b'), tip('c')]), { onReorder, onAdd: vi.fn() }));
+    drag(tileFor(grid, 'a'), 'dragstart');
+    drag(grid, 'drop'); // empty grid: a goes last
+    expect(onReorder).toHaveBeenLastCalledWith('a', 3);
+    tileFor(grid, 'a').focus();
+    handleBoardKeys(grid, new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, cancelable: true }));
+    // b c a -> b a c: between b (1) and c (2).
+    expect(onReorder).toHaveBeenLastCalledWith('a', 1.5);
   });
 });

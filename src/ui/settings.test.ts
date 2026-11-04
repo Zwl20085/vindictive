@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SAMPLE_SETTINGS } from '../mock/sample-tips';
-import { normaliseShortcut, parseHighlightWords, readSettings, renderSettings, sameShortcut, type SettingsActions } from './settings';
+import { DISCARD_CONFIRM_MS } from './edit-form';
+import { isSettingsDirty, normaliseShortcut, parseHighlightWords, readSettings, renderSettings, sameShortcut, settingsEscape, type SettingsActions } from './settings';
 
 const actions: SettingsActions = {
   onSave: vi.fn(async () => undefined),
@@ -163,5 +164,43 @@ describe('highlight words', () => {
   });
   it('parses the list on its own', () => {
     expect(parseHighlightWords('one,two, two')).toEqual(['one', 'two']);
+  });
+});
+
+describe('unsaved settings', () => {
+  it('is clean as rendered, dirty after a change, clean again when put back', () => {
+    const { form, top } = render();
+    expect(isSettingsDirty(form, SAMPLE_SETTINGS)).toBe(false);
+    const city = form.querySelector<HTMLInputElement>('input[name="weather_location"]') as HTMLInputElement;
+    city.value = 'Kyoto';
+    expect(isSettingsDirty(form, SAMPLE_SETTINGS)).toBe(true);
+    city.value = SAMPLE_SETTINGS.weather_location;
+    expect(isSettingsDirty(form, SAMPLE_SETTINGS)).toBe(false);
+    top.checked = !top.checked;
+    expect(isSettingsDirty(form, SAMPLE_SETTINGS)).toBe(true);
+    // Compared with the settings given: after a save they are the new baseline.
+    expect(isSettingsDirty(form, { ...SAMPLE_SETTINGS, always_on_top: top.checked })).toBe(false);
+  });
+
+  it('Esc leaves a clean form at once; a dirty one only on a second Esc in time', () => {
+    vi.useFakeTimers();
+    try {
+      const { form } = render();
+      expect(settingsEscape(form, SAMPLE_SETTINGS)).toBe(true);
+      (form.querySelector('input[name="weather_location"]') as HTMLInputElement).value = 'Kyoto';
+      expect(settingsEscape(form, SAMPLE_SETTINGS)).toBe(false);
+      const status = form.querySelector<HTMLElement>('.set-status');
+      expect(status?.dataset.state).toBe('confirm');
+      expect(status?.textContent).toMatch(/Esc again/);
+      // Too slow: the hint clears and the next Esc only arms again.
+      vi.advanceTimersByTime(DISCARD_CONFIRM_MS + 1);
+      expect(status?.textContent).toBe('');
+      expect(settingsEscape(form, SAMPLE_SETTINGS)).toBe(false);
+      vi.advanceTimersByTime(DISCARD_CONFIRM_MS - 500);
+      expect(settingsEscape(form, SAMPLE_SETTINGS)).toBe(true);
+      expect(status?.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

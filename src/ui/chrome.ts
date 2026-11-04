@@ -50,49 +50,72 @@ function buildMenu(options: ChromeOptions, x: number, y: number, returnFocus?: H
   );
 }
 
+/** Latest options per strip, so its listeners act on the current state after `updateChrome`. */
+const current = new WeakMap<HTMLElement, ChromeOptions>();
+
+/** Set an attribute only when it changes (a rewrite would re-announce live text). */
+function setAttr(node: Element, name: string, value: string): void {
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+}
+
 /**
  * The 20 px drag strip with the sync square. The square is a button: click,
  * Enter or Space reloads the tips folder; the menu key or Shift+F10 on it opens
  * the strip menu under it, and right-click anywhere on the strip opens the same
  * menu at the pointer. The sync state is announced through a visually hidden
- * live region.
+ * live region. The whole strip drags the window (`deep`: its title text too);
+ * the square, being a button, stays clickable.
  */
 export function renderChrome(options: ChromeOptions): HTMLElement {
-  const { state, sync } = options;
-  const status: SyncStatus = state?.sync_error ? 'error' : sync;
-  const title = syncTitle(state, sync);
-  const dot = el('button', {
-    type: 'button',
-    className: 'sync-dot',
-    'data-state': status,
-    'aria-label': `${title} · ${t('menuSync')}`,
-    'aria-haspopup': 'menu',
-    title,
-  });
-  const live = el('span', { className: 'visually-hidden', role: 'status', 'aria-live': 'polite', text: title });
+  const dot = el('button', { type: 'button', className: 'sync-dot', 'aria-haspopup': 'menu' });
+  const live = el('span', { className: 'visually-hidden', role: 'status', 'aria-live': 'polite' });
   const strip = el(
     'header',
-    { className: 'chrome', 'data-tauri-drag-region': true, title },
+    { className: 'chrome', 'data-tauri-drag-region': 'deep' },
     dot,
     live,
-    el('span', { className: 'chrome-title', 'data-tauri-drag-region': true, text: BRAND }),
+    el('span', { className: 'chrome-title', text: BRAND }),
   );
+  updateChrome(strip, options);
+  const latest = (): ChromeOptions => current.get(strip) ?? options;
   strip.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     // The keyboard menu key reports no pointer position: open under the square.
     if (event.clientX === 0 && event.clientY === 0) {
       const r = dot.getBoundingClientRect();
-      buildMenu(options, r.left, r.bottom, dot);
-    } else buildMenu(options, event.clientX, event.clientY);
+      buildMenu(latest(), r.left, r.bottom, dot);
+    } else buildMenu(latest(), event.clientX, event.clientY);
   });
-  dot.addEventListener('click', options.actions.onSync);
+  dot.addEventListener('click', () => latest().actions.onSync());
   dot.addEventListener('keydown', (event) => {
     if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
       // Handled here, so the browser does not also fire a contextmenu event.
       event.preventDefault();
       const r = dot.getBoundingClientRect();
-      buildMenu(options, r.left, r.bottom, dot);
+      buildMenu(latest(), r.left, r.bottom, dot);
     }
   });
   return strip;
+}
+
+/**
+ * Bring a strip from `renderChrome` up to date in place: sync state, titles
+ * and the live text. The nodes stay, so focus on the square and a click in
+ * progress survive store updates. Labels are in the current language; a
+ * language switch needs a fresh `renderChrome`.
+ */
+export function updateChrome(strip: HTMLElement, options: ChromeOptions): void {
+  current.set(strip, options);
+  const { state, sync } = options;
+  const status: SyncStatus = state?.sync_error ? 'error' : sync;
+  const title = syncTitle(state, sync);
+  const dot = strip.querySelector('.sync-dot');
+  const live = strip.querySelector('[role="status"]');
+  setAttr(strip, 'title', title);
+  if (dot) {
+    setAttr(dot, 'data-state', status);
+    setAttr(dot, 'aria-label', `${title} · ${t('menuSync')}`);
+    setAttr(dot, 'title', title);
+  }
+  if (live && live.textContent !== title) live.textContent = title;
 }

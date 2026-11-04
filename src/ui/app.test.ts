@@ -5,6 +5,7 @@ import type { BoardState, Tip } from '../types';
 const backend = vi.hoisted(() => ({
   handlers: {} as Record<string, (args: unknown) => Promise<unknown>>,
   emit: undefined as ((board: unknown) => void) | undefined,
+  listeners: new Map<string, (payload: unknown) => void>(),
 }));
 
 vi.mock('../api', () => ({
@@ -14,11 +15,16 @@ vi.mock('../api', () => ({
     backend.emit = cb;
     return () => undefined;
   },
-  on: async () => () => undefined,
+  on: async (event: string, cb: (payload: unknown) => void) => {
+    backend.listeners.set(event, cb);
+    return () => undefined;
+  },
   openExternal: vi.fn(async () => undefined),
 }));
 
 const { App, TICK_MS } = await import('./app');
+const { isLightboxOpen, showLightbox } = await import('./lightbox');
+const { closeMenu, isMenuOpen } = await import('./menu');
 
 function tip(id: string, extra: Partial<Tip> = {}): Tip {
   return { id, path: `${id}.md`, sha: `sha-${id}`, title: `Tip ${id}`, kind: 'task', priority: 'normal', status: 'open', body: 'Body', remind_at: [], ...extra };
@@ -70,6 +76,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  closeMenu();
   vi.clearAllTimers();
   vi.useRealTimers();
   document.body.innerHTML = '';
@@ -299,5 +306,264 @@ describe('App create form', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await vi.waitFor(() => expect(quick).toHaveBeenCalledWith({ text: 'Quick one' }));
     expect(createForm()).toBeNull();
+  });
+});
+
+const stageOpen = (): boolean => !!root.querySelector('.stage')?.classList.contains('open');
+const keydown = (target: EventTarget, key: string, extra: KeyboardEventInit = {}): KeyboardEvent => {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra });
+  target.dispatchEvent(event);
+  return event;
+};
+function openTileMenu(id: string): HTMLElement {
+  tile(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+  const menu = document.querySelector<HTMLElement>('.menu');
+  if (!menu) throw new Error('no menu');
+  return menu;
+}
+const menuItem = (menu: HTMLElement, label: string): HTMLElement =>
+  Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((li) => li.textContent?.includes(label)) as HTMLElement;
+
+describe('App with a context menu open', () => {
+  it('board keys (n, arrows) do not act behind the menu', async () => {
+    await start();
+    const menu = openTileMenu('b');
+    expect(isMenuOpen()).toBe(true);
+    keydown(document.activeElement ?? document.body, 'n');
+    keydown(document.activeElement ?? document.body, 'Insert');
+    expect(front().querySelector('.addbar')).toBeNull();
+    keydown(document.activeElement ?? document.body, 'ArrowDown');
+    expect(menu.contains(document.activeElement)).toBe(true);
+    keydown(document.activeElement ?? document.body, 'ArrowRight');
+    expect(menu.contains(document.activeElement)).toBe(true);
+    keydown(document.activeElement ?? document.body, 'Escape');
+    expect(isMenuOpen()).toBe(false);
+    keydown(document.body, 'n');
+    expect(front().querySelector('.addbar')).not.toBeNull();
+  });
+
+  it('closes the tile menu when a board update replaces that tile', async () => {
+    await start();
+    openTileMenu('a');
+    backend.emit?.(board([tip('a'), tip('b')]));
+    expect(isMenuOpen()).toBe(true);
+    backend.emit?.(board([tip('a', { sha: 'sha-a2' }), tip('b')]));
+    expect(isMenuOpen()).toBe(false);
+  });
+});
+
+describe('App edit origin', () => {
+  it('Edit from the tile menu returns to the board on Cancel, with the tile focused', async () => {
+    await start();
+    menuItem(openTileMenu('b'), 'Edit').click();
+    const form = back().querySelector<HTMLFormElement>('.edit-form[data-editing="b"]');
+    expect(form).not.toBeNull();
+    keydown(form?.querySelector('[name="title"]') as HTMLElement, 'Escape');
+    expect(stageOpen()).toBe(false);
+    expect(back().querySelector('.detail')).toBeNull();
+    expect(document.activeElement).toBe(tile('b'));
+  });
+
+  it('Edit from the tile menu returns to the board after saving', async () => {
+    await start();
+    backend.handlers.update_tip = async () => board([tip('a'), tip('b', { sha: 'sha-b2', title: 'Renamed' })]);
+    menuItem(openTileMenu('b'), 'Edit').click();
+    back().querySelector<HTMLFormElement>('.edit-form')?.requestSubmit();
+    await vi.waitFor(() => expect(stageOpen()).toBe(false));
+    expect(back().querySelector('.detail')).toBeNull();
+  });
+
+  it('Edit from the detail still returns to the detail', async () => {
+    await start();
+    const panel = await openDetail('a');
+    (Array.from(panel.querySelectorAll<HTMLButtonElement>('.action')).find((b) => b.textContent === 'Edit') as HTMLButtonElement).click();
+    const form = back().querySelector<HTMLFormElement>('.edit-form[data-editing="a"]');
+    expect(form).not.toBeNull();
+    keydown(form?.querySelector('[name="title"]') as HTMLElement, 'Escape');
+    expect(stageOpen()).toBe(true);
+    expect(back().querySelector('.detail')).not.toBeNull();
+  });
+});
+
+describe('App settings Esc', () => {
+  it('asks before discarding changed settings; a second Esc closes', async () => {
+    const holder = document.createElement('div');
+    document.body.append(holder);
+    root = holder;
+    backend.handlers.get_state = async () => board();
+    const app = new App(holder);
+    await app.start();
+    app.openSettings();
+    const form = holder.querySelector<HTMLFormElement>('.face-back .settings') as HTMLFormElement;
+    // Untouched: one Esc closes.
+    keydown(document.body, 'Escape');
+    expect(stageOpen()).toBe(false);
+    app.openSettings();
+    const again = holder.querySelector<HTMLFormElement>('.face-back .settings') as HTMLFormElement;
+    expect(again).not.toBe(form);
+    (again.querySelector('input[name="weather_location"]') as HTMLInputElement).value = 'Kyoto';
+    keydown(document.body, 'Escape');
+    expect(stageOpen()).toBe(true);
+    expect(again.querySelector('.set-status')?.textContent).toMatch(/Esc again/);
+    keydown(document.body, 'Escape');
+    expect(stageOpen()).toBe(false);
+  });
+});
+
+describe('App when the shown tip disappears', () => {
+  it('closes the lightbox and returns to the board from the detail', async () => {
+    await start();
+    await openDetail('a');
+    showLightbox('data:image/png;base64,', 'figure');
+    expect(isLightboxOpen()).toBe(true);
+    backend.emit?.(board([tip('b')]));
+    expect(isLightboxOpen()).toBe(false);
+    expect(stageOpen()).toBe(false);
+  });
+
+  it('keeps a dirty edit form open with a notice; a clean one returns to the board', async () => {
+    await start();
+    menuItem(openTileMenu('a'), 'Edit').click();
+    const form = back().querySelector<HTMLFormElement>('.edit-form[data-editing="a"]') as HTMLFormElement;
+    (form.querySelector('[name="body"]') as HTMLTextAreaElement).value = 'unsaved words';
+    backend.emit?.(board([tip('b')]));
+    expect(stageOpen()).toBe(true);
+    expect(back().querySelector('.edit-form')).toBe(form);
+    expect((form.querySelector('[name="body"]') as HTMLTextAreaElement).value).toBe('unsaved words');
+    expect(form.querySelector('.set-status')?.textContent).toMatch(/removed or renamed/);
+    // Cancel cannot go back to a detail that no longer exists: the board.
+    form.querySelector<HTMLButtonElement>('.action-back')?.click();
+    expect(stageOpen()).toBe(false);
+
+    backend.emit?.(board([tip('a'), tip('b')]));
+    menuItem(openTileMenu('a'), 'Edit').click();
+    expect(back().querySelector('.edit-form[data-editing="a"]')).not.toBeNull();
+    backend.emit?.(board([tip('b')]));
+    expect(stageOpen()).toBe(false);
+  });
+});
+
+describe('App chrome strip', () => {
+  it('updates the strip in place, keeping focus on the sync square; a language switch rebuilds it', async () => {
+    await start();
+    const strip = root.querySelector<HTMLElement>('.chrome');
+    const dot = strip?.querySelector<HTMLButtonElement>('.sync-dot') as HTMLButtonElement;
+    dot.focus();
+    let release: (b: BoardState) => void = () => undefined;
+    backend.handlers.sync_now = () => new Promise<BoardState>((resolve) => (release = resolve));
+    dot.click();
+    expect(dot.dataset.state).toBe('syncing');
+    release(board());
+    await vi.waitFor(() => expect(dot.dataset.state).toBe('ok'));
+    expect(root.querySelector('.chrome')).toBe(strip);
+    expect(document.activeElement).toBe(dot);
+    backend.emit?.({ ...board(), settings: { ...board().settings, language: 'zh' } });
+    expect(root.querySelector('.chrome')).not.toBe(strip);
+  });
+});
+
+describe('App fit height', () => {
+  const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+  const innerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+  const setWindowHeight = (h: number): void => {
+    Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: h });
+  };
+  beforeEach(() => {
+    // jsdom has no layout: the grid is 100 px per tile, everything else 0.
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains('board') ? 100 * this.querySelectorAll('.tile[data-id]').length : 0;
+      },
+    });
+    setWindowHeight(768);
+  });
+  afterEach(() => {
+    if (heightDescriptor) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', heightDescriptor);
+    if (innerHeight) Object.defineProperty(window, 'innerHeight', innerHeight);
+  });
+  const fitBoard = (tips: Tip[]): BoardState => {
+    const b = board(tips);
+    return { ...b, settings: { ...b.settings, fit_height: true } };
+  };
+
+  it('leaves a height the user chose until the board layout changes', async () => {
+    const fit = vi.fn(async (_args: unknown) => undefined);
+    backend.handlers.fit_window = fit;
+    await start(fitBoard([tip('a'), tip('b')]));
+    expect(fit).toHaveBeenLastCalledWith({ height: 200 });
+    // The window answers the request.
+    setWindowHeight(200);
+    window.dispatchEvent(new Event('resize'));
+    // The user drags the bottom edge.
+    setWindowHeight(500);
+    window.dispatchEvent(new Event('resize'));
+    const calls = fit.mock.calls.length;
+    vi.advanceTimersByTime(TICK_MS * 3);
+    backend.emit?.(fitBoard([tip('a', { sha: 'sha-a2' }), tip('b')]));
+    expect(fit.mock.calls.length).toBe(calls);
+    // One more tile: the layout changed, fit again.
+    backend.emit?.(fitBoard([tip('a'), tip('b'), tip('c')]));
+    expect(fit).toHaveBeenLastCalledWith({ height: 300 });
+  });
+
+  const resizeTo = (h: number): void => {
+    setWindowHeight(h);
+    window.dispatchEvent(new Event('resize'));
+  };
+  const announce = (height: number): void => backend.listeners.get('app-sized')?.({ width: 400, height });
+
+  it('a resize the backend announced (app-sized) does not suspend fitting', async () => {
+    const fit = vi.fn(async (_args: unknown) => undefined);
+    backend.handlers.fit_window = fit;
+    await start(fitBoard([tip('a'), tip('b')]));
+    announce(200);
+    resizeTo(200);
+    const calls = fit.mock.calls.length;
+    // A dock or clamp: announced, then applied. Not the user's, so fit again.
+    announce(640);
+    resizeTo(640);
+    expect(fit.mock.calls.length).toBe(calls + 1);
+    expect(fit).toHaveBeenLastCalledWith({ height: 200 });
+  });
+
+  it('an unannounced resize after sizing has started is the user\'s', async () => {
+    const fit = vi.fn(async (_args: unknown) => undefined);
+    backend.handlers.fit_window = fit;
+    await start(fitBoard([tip('a'), tip('b')]));
+    announce(200);
+    resizeTo(200);
+    announce(640); // announced, but a different height
+    resizeTo(480);
+    const calls = fit.mock.calls.length;
+    vi.advanceTimersByTime(TICK_MS);
+    backend.emit?.(fitBoard([tip('a', { sha: 'sha-a2' }), tip('b')]));
+    expect(fit.mock.calls.length).toBe(calls);
+  });
+
+  it('resizes before any sizing round-trip (startup) are not the user\'s', async () => {
+    const fit = vi.fn(async (_args: unknown) => undefined);
+    backend.handlers.fit_window = fit;
+    const off = board([tip('a'), tip('b')]); // fit_height off: no fit_window round-trip yet
+    await start(off);
+    resizeTo(900);
+    backend.emit?.(fitBoard([tip('a'), tip('b')]));
+    expect(fit).toHaveBeenLastCalledWith({ height: 200 });
+  });
+
+  it('a width-only resize is not taken for a manual height', async () => {
+    const fit = vi.fn(async (_args: unknown) => undefined);
+    backend.handlers.fit_window = fit;
+    await start(fitBoard([tip('a'), tip('b')]));
+    setWindowHeight(200);
+    window.dispatchEvent(new Event('resize'));
+    window.dispatchEvent(new Event('resize'));
+    backend.emit?.(fitBoard([tip('a'), tip('b'), tip('c')]));
+    expect(fit).toHaveBeenLastCalledWith({ height: 300 });
+    // Shrinking back to two tiles fits again, too.
+    setWindowHeight(300);
+    window.dispatchEvent(new Event('resize'));
+    backend.emit?.(fitBoard([tip('a'), tip('b')]));
+    expect(fit).toHaveBeenLastCalledWith({ height: 200 });
   });
 });
