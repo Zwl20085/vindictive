@@ -384,6 +384,11 @@ fn write_durably(path: &Path, text: &str) -> std::io::Result<()> {
     file.sync_all()
 }
 
+/// Modification time (full precision, nanoseconds since the epoch) and
+/// length. The filesystem's own clock is coarser than that (NTFS updates
+/// in 100 ns units but can lag, FAT in 2 s), so two quick writes of the
+/// same length can share a stamp; callers that must notice every save, like
+/// the broken-file retry, also retry on a timer.
 fn stamp_of(meta: &std::fs::Metadata) -> String {
     let nanos = meta
         .modified()

@@ -7,6 +7,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use chrono::{Local, NaiveDateTime, Timelike};
 use serde::Serialize;
@@ -30,6 +31,26 @@ const MAX_ANNOUNCED_NEW_TIPS: usize = 10;
 const BULK_MIN_NEW_TIPS: usize = 3;
 /// Weather older than this is refetched.
 pub const WEATHER_FRESH_MINUTES: i64 = 20;
+/// A broken file whose stamp has not changed is still read again after
+/// this long: a quick fix of the same length can land in the same
+/// filesystem timestamp tick and leave the stamp as it was.
+const BROKEN_RETRY: Duration = Duration::from_secs(5);
+
+/// A file that could not be loaded.
+#[derive(Debug, Clone)]
+pub struct Broken {
+    /// The stamp that failed.
+    pub stamp: String,
+    /// Why, shown in the sync dot.
+    pub reason: String,
+    /// When it was last read.
+    pub last_attempt: Instant,
+}
+
+/// A broken file read at `last_attempt` is due for another read at `now`.
+fn retry_due(last_attempt: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(last_attempt) >= BROKEN_RETRY
+}
 
 #[derive(Debug, Default)]
 pub struct Inner {
@@ -41,9 +62,9 @@ pub struct Inner {
     pub image_cache: HashMap<String, String>,
     /// Last weather result and the place it was fetched for.
     pub weather: Option<(String, Weather)>,
-    /// Files that could not be loaded, by path: the stamp that failed and
-    /// why. They are skipped until saved again and shown as a sync error.
-    pub broken: HashMap<String, (String, String)>,
+    /// Files that could not be loaded, by path. They are skipped until
+    /// saved again (or `BROKEN_RETRY` has passed) and shown as a sync error.
+    pub broken: HashMap<String, Broken>,
     /// The last scan found the folder empty while the board had tips. The
     /// removal is applied only if the next scan is empty too, so a folder
     /// that briefly vanishes (OneDrive unmounting) does not wipe the board.
@@ -287,14 +308,22 @@ impl AppState {
             .iter()
             .map(|f| (f.path.as_str(), f.stamp.as_str()))
             .collect();
-        // A broken file is retried once it changes (or is gone).
-        let broken = self.with(|i| {
+        // A broken file is retried once it changes (or is gone), and also
+        // every `BROKEN_RETRY`, since a quick same-length fix can keep the
+        // stamp. An entry being retried stays (with its error) until the
+        // read succeeds, so the sync dot does not flicker.
+        let now_instant = Instant::now();
+        let skipped: HashSet<String> = self.with(|i| {
             i.broken
-                .retain(|path, (stamp, _)| stamps.get(path.as_str()) == Some(&stamp.as_str()));
-            i.broken.clone()
+                .retain(|path, b| stamps.get(path.as_str()) == Some(&b.stamp.as_str()));
+            i.broken
+                .iter()
+                .filter(|(_, b)| !retry_due(b.last_attempt, now_instant))
+                .map(|(path, _)| path.clone())
+                .collect()
         });
         let mut plan = plan(&seen, &listing);
-        plan.to_fetch.retain(|path| !broken.contains_key(path));
+        plan.to_fetch.retain(|path| !skipped.contains(path));
         if plan.to_fetch.is_empty() && plan.removed.is_empty() {
             return Ok((false, Vec::new()));
         }
@@ -309,6 +338,7 @@ impl AppState {
             let failed = match store.read_text(path) {
                 Ok((text, stamp)) => match Tip::parse(path, Some(stamp.clone()), &text) {
                     Ok(tip) => {
+                        self.with(|i| i.broken.remove(path));
                         fetched.push(tip);
                         continue;
                     }
@@ -318,7 +348,13 @@ impl AppState {
                 Err(FolderError::Changing(_)) => continue,
                 Err(e) => (stamps[path.as_str()].to_string(), e.to_string()),
             };
-            self.with(|i| i.broken.insert(path.clone(), failed));
+            let (stamp, reason) = failed;
+            let broken = Broken {
+                stamp,
+                reason,
+                last_attempt: Instant::now(),
+            };
+            self.with(|i| i.broken.insert(path.clone(), broken));
         }
         let (changed, new_ids, tips) = self.with(|i| {
             // Apply against the *current* board, skipping any tip a command
@@ -390,7 +426,7 @@ impl AppState {
         message: &str,
     ) -> Result<Tip, String> {
         let store = self.store()?;
-        if let Some((_, reason)) = self.with(|i| i.broken.get(&tip.path).cloned()) {
+        if let Some(reason) = self.with(|i| i.broken.get(&tip.path).map(|b| b.reason.clone())) {
             return Err(format!(
                 "{} has an error; fix it in the editor and save first ({reason})",
                 tip.path
@@ -500,10 +536,7 @@ fn is_bulk(new: usize, total: usize) -> bool {
 }
 
 /// Broken files and conflict copies together, for the sync dot.
-fn sync_summary(
-    broken: &HashMap<String, (String, String)>,
-    conflicts: Option<&str>,
-) -> Option<String> {
+fn sync_summary(broken: &HashMap<String, Broken>, conflicts: Option<&str>) -> Option<String> {
     match (broken_summary(broken), conflicts) {
         (Some(b), Some(c)) => Some(format!("{b}; {c}")),
         (b, c) => b.or_else(|| c.map(str::to_string)),
@@ -511,11 +544,11 @@ fn sync_summary(
 }
 
 /// One line about files that could not be loaded, for the sync dot.
-fn broken_summary(broken: &HashMap<String, (String, String)>) -> Option<String> {
+fn broken_summary(broken: &HashMap<String, Broken>) -> Option<String> {
     let mut paths: Vec<&String> = broken.keys().collect();
     paths.sort();
     let first = paths.first()?;
-    let (_, reason) = &broken[*first];
+    let reason = &broken[*first].reason;
     let more = match paths.len() {
         1 => String::new(),
         n => format!(" (and {} more)", n - 1),
@@ -605,9 +638,63 @@ title: Fixed now
 ",
         )
         .unwrap();
+        // The fix has the same length; on a fast machine both writes can
+        // share a timestamp tick, so move the clock on explicitly.
+        set_mtime(
+            &folder.path().join("bad.md"),
+            std::time::SystemTime::now() + Duration::from_secs(2),
+        );
         state.sync_inner().unwrap();
         assert_eq!(state.board().get("bad").unwrap().front.title, "Fixed now");
         assert!(state.with(|i| i.broken.is_empty()));
+    }
+
+    fn set_mtime(path: &Path, when: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    #[test]
+    fn broken_files_are_retried_when_the_stamp_cannot_tell() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        let path = folder.path().join("bad.md");
+        std::fs::write(&path, "---\ntitle: [unclosed\n---\n").unwrap();
+        let first = std::fs::metadata(&path).unwrap().modified().unwrap();
+        state.sync_inner().unwrap();
+        assert!(state.with(|i| i.broken.contains_key("bad.md")));
+
+        // Same length, same modification time: the stamp is unchanged.
+        std::fs::write(&path, "---\ntitle: Fixed now\n---\n").unwrap();
+        set_mtime(&path, first);
+        assert_eq!(state.sync_inner().unwrap(), (false, vec![]));
+        assert!(state.board().get("bad").is_none(), "skipped while recent");
+        let summary = state.with(|i| sync_summary(&i.broken, None)).unwrap();
+        assert!(summary.starts_with("cannot load bad.md"), "{summary}");
+
+        // Once the retry interval has passed, it is read again.
+        state.with(|i| {
+            let b = i.broken.get_mut("bad.md").unwrap();
+            b.last_attempt = b.last_attempt.checked_sub(BROKEN_RETRY).unwrap();
+        });
+        assert!(state.sync_inner().unwrap().0);
+        assert_eq!(state.board().get("bad").unwrap().front.title, "Fixed now");
+        assert!(state.with(|i| i.broken.is_empty()));
+    }
+
+    #[test]
+    fn retry_is_due_after_the_interval() {
+        let t = Instant::now();
+        assert!(!retry_due(t, t));
+        assert!(!retry_due(t, t + BROKEN_RETRY - Duration::from_millis(1)));
+        assert!(retry_due(t, t + BROKEN_RETRY));
+        // A clock that seems to run backwards never triggers a retry.
+        assert!(!retry_due(t + BROKEN_RETRY, t));
     }
 
     #[test]
@@ -765,8 +852,15 @@ title: Fixed now
             2,
             "copies are not hidden"
         );
-        let broken: HashMap<String, (String, String)> =
-            [("b.md".to_string(), ("s".to_string(), "bad".to_string()))].into();
+        let broken: HashMap<String, Broken> = [(
+            "b.md".to_string(),
+            Broken {
+                stamp: "s".to_string(),
+                reason: "bad".to_string(),
+                last_attempt: Instant::now(),
+            },
+        )]
+        .into();
         assert_eq!(
             sync_summary(&broken, Some("c")).as_deref(),
             Some("cannot load b.md: bad; c")
