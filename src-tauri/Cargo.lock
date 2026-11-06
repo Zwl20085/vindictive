@@ -5009,7 +5009,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vindictive"
 version = "0.5.3"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "log",
  "regex",
