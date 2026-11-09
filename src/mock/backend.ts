@@ -3,7 +3,7 @@
  * outside Tauri. Every mutation produces new arrays; nothing is mutated.
  */
 import type { BoardState, Commands, Events, Settings, Tip, TipEdit, Weather } from '../types';
-import { withAgentState } from '../lib/agent';
+import { agentInfo, withAgentState } from '../lib/agent';
 import { parseCapture } from '../lib/capture-hint';
 import { MINUTE_MS, parseNaive, toNaive } from '../lib/time';
 import { urgencyOf } from '../lib/urgency';
@@ -262,6 +262,25 @@ function applyEdit(tip: Tip, base: string | null, edit: TipEdit): Tip {
   return { ...tip, ...editFields(edit) };
 }
 
+/**
+ * The mock's `agent::results_rel` (`core/agent.rs`): `agent.results` must be a
+ * relative path under `agent/`, without `.`, `..`, a drive, a root or `:`.
+ * Returns the cleaned `/`-separated path; throws what the backend refuses.
+ * (The backend also requires an existing folder; the mock has no disk.)
+ */
+export function agentResultsRel(results: string): string {
+  const cleaned = results.trim().replace(/\\/g, '/');
+  const refuse = (): Error => new Error(`refusing results path ${JSON.stringify(results)}: it must stay inside the tips folder`);
+  if (!cleaned) throw new Error('the agent has not recorded a results folder');
+  if (cleaned.startsWith('/') || cleaned.includes(':')) throw refuse();
+  const parts = cleaned.split('/').filter(Boolean);
+  if (parts.length === 0 || parts.some((p) => p === '.' || p === '..')) throw refuse();
+  if (parts.length < 2 || parts[0] !== 'agent') {
+    throw new Error(`refusing results path ${JSON.stringify(results)}: it must be a folder under agent/`);
+  }
+  return parts.join('/');
+}
+
 function mockWeather(location: string): Weather {
   const hour = new Date().getHours();
   return {
@@ -305,7 +324,11 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
   },
   open_folder: () => undefined,
   open_agent_results: ({ id }) => {
-    if (!store.tips.find((t) => t.id === id)?.agent) throw new Error(`tip ${id} has no agent results`);
+    const tip = store.tips.find((t) => t.id === id);
+    if (!tip) throw new Error(`tip ${id} not found`);
+    const results = agentInfo(tip).results;
+    if (!results) throw new Error('the agent has not recorded a results folder for this tip');
+    agentResultsRel(results);
   },
   pick_folder: () => 'D:\\OneDrive\\Tips',
   delete_tip: ({ id }) => {

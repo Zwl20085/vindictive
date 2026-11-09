@@ -326,7 +326,7 @@ pub struct Tip {
 }
 
 /// Top-level JSON keys of a `Tip` besides the frontmatter ones.
-const TIP_KEYS: [&str; 10] = [
+const TIP_KEYS: [&str; 11] = [
     "id",
     "path",
     "sha",
@@ -336,6 +336,7 @@ const TIP_KEYS: [&str; 10] = [
     "snoozed_until_at",
     "warnings",
     "agent_state",
+    "agent_yaml",
     "shadowed",
 ];
 
@@ -343,6 +344,10 @@ const TIP_KEYS: [&str; 10] = [
 /// flattened into it, so an unknown frontmatter key named like a tip field
 /// (`id: 20240101` from Obsidian, say) would emit that key twice. Such keys
 /// travel in `shadowed` instead and are put back on the way in.
+///
+/// The `agent` map does not travel as JSON (it may hold keys JSON cannot,
+/// like `1:` or `~:`, or `.nan`): `agent` is only the read-only view the UI
+/// shows, and `agent_yaml` is the value as YAML text, read back on the way in.
 #[derive(Serialize, Deserialize)]
 struct TipJson {
     id: String,
@@ -365,6 +370,13 @@ struct TipJson {
     /// Output only: recomputed from the frontmatter and body on the way in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent_state: Option<AgentState>,
+    /// The `agent` view for the UI (`Agent::json_view`). Ignored on the way
+    /// in, except in a cache written before `agent_yaml` existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent: Option<serde_json::Value>,
+    /// The `agent` value as YAML text; empty if it could not be written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_yaml: Option<String>,
 }
 
 impl From<Tip> for TipJson {
@@ -374,6 +386,9 @@ impl From<Tip> for TipJson {
             .into_iter()
             .partition(|(k, _)| TIP_KEYS.contains(&k.as_str()));
         front.extra = extra;
+        let agent = front.agent.take();
+        let view = agent.as_ref().and_then(Agent::json_view);
+        let agent_yaml = agent.map(|a| a.to_yaml().unwrap_or_default());
         TipJson {
             id: tip.id,
             path: tip.path,
@@ -386,6 +401,8 @@ impl From<Tip> for TipJson {
             snoozed_until_at: tip.snoozed_until_at,
             warnings: tip.warnings,
             agent_state: tip.agent_state,
+            agent: view,
+            agent_yaml,
         }
     }
 }
@@ -394,11 +411,15 @@ impl From<TipJson> for Tip {
     fn from(json: TipJson) -> Self {
         let mut front = json.front;
         front.extra.extend(json.shadowed);
+        let (agent, exact) = agent_from_json(json.agent_yaml.as_deref(), json.agent);
+        front.agent = agent;
         let agent_state = agent_state_of(&front, &json.body);
         Tip {
             id: json.id,
             path: json.path,
-            sha: json.sha,
+            // A copy that may differ from the file is not written back: with
+            // no stamp, the next scan reads the file again first.
+            sha: json.sha.filter(|_| exact),
             front,
             body: json.body,
             due_at: json.due_at,
@@ -568,6 +589,21 @@ impl Tip {
             front.kind = Kind::Reading;
         }
         self.with_front(front)
+    }
+}
+
+/// The `agent` value of a JSON tip, and whether it is exactly the file's:
+/// from `agent_yaml` when present; else, in a cache written before it
+/// existed, from the JSON map (key order and non-string keys may be lost).
+fn agent_from_json(yaml: Option<&str>, old: Option<serde_json::Value>) -> (Option<Agent>, bool) {
+    match (yaml, old) {
+        (Some(text), _) if !text.trim().is_empty() => match Agent::from_yaml(text) {
+            Ok(agent) => (Some(agent), true),
+            Err(_) => (None, false),
+        },
+        (Some(_), _) => (None, false),
+        (None, Some(json)) => (serde_yaml::to_value(json).ok().map(Agent::new), false),
+        (None, None) => (None, true),
     }
 }
 
@@ -1006,7 +1042,11 @@ due: 2026-11-20
     fn agent_map_survives_every_board_write_byte_for_byte() {
         let tip = Tip::parse("survey.md", Some("s1".into()), &agent_file(AGENT_BLOCK)).unwrap();
         assert_eq!(tip.front.kind, Kind::Agent);
-        assert!(matches!(tip.front.agent, Some(Agent::Typed(_))));
+        assert!(tip
+            .front
+            .agent
+            .as_ref()
+            .is_some_and(|a| a.value().is_mapping()));
         assert_eq!(tip.agent_state, Some(AgentState::Question));
         for (name, written) in board_writes(&tip) {
             let text = written.to_markdown().unwrap();
@@ -1078,6 +1118,137 @@ due: 2026-11-20
         assert!(out.contains("agent:\n- not\n- a\n- map\n"), "{out}");
     }
 
+    /// The `agent` value of a written file, straight from its YAML.
+    fn agent_value(markdown: &str) -> serde_yaml::Value {
+        let front: serde_yaml::Value = serde_yaml::from_str(split(markdown).unwrap().0).unwrap();
+        front
+            .as_mapping()
+            .and_then(|m| m.get("agent"))
+            .cloned()
+            .expect("the file has an agent key")
+    }
+
+    /// Every mapping key in `value`, depth first, in document order, with
+    /// its path; equal `Value`s can still differ here, since mapping
+    /// equality ignores order.
+    fn key_order(value: &serde_yaml::Value) -> Vec<String> {
+        fn walk(value: &serde_yaml::Value, path: &str, out: &mut Vec<String>) {
+            match value {
+                serde_yaml::Value::Mapping(map) => {
+                    for (k, v) in map {
+                        let key = format!("{path}/{}", serde_yaml::to_string(k).unwrap().trim());
+                        out.push(key.clone());
+                        walk(v, &key, out);
+                    }
+                }
+                serde_yaml::Value::Sequence(items) => {
+                    for (i, v) in items.iter().enumerate() {
+                        walk(v, &format!("{path}[{i}]"), out);
+                    }
+                }
+                serde_yaml::Value::Tagged(t) => walk(&t.value, path, out),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        walk(value, "", &mut out);
+        out
+    }
+
+    /// A well-typed map in no canonical order, with nulls and empty values.
+    const UNORDERED_AGENT: &str = "agent:
+  results:
+  state: done
+  v: 1
+  zeta: last-but-written-first
+  host: null
+  run: ~
+  hash: sha256:x
+  alpha:
+    zulu: 1
+    beta: [b, a]
+    alpha: {y: 2, x: 1}
+  at: 2026-11-09T07:31:00
+";
+
+    #[test]
+    fn agent_values_keep_order_and_nulls_through_every_board_write() {
+        let text = agent_file(UNORDERED_AGENT);
+        let original = agent_value(&text);
+        let order = key_order(&original);
+        assert_eq!(
+            order[..4],
+            ["/results", "/state", "/v", "/zeta"],
+            "the fixture is unordered"
+        );
+        let tip = Tip::parse("survey.md", Some("s1".into()), &text).unwrap();
+        for (name, written) in board_writes(&tip) {
+            let out = written.to_markdown().unwrap();
+            let value = agent_value(&out);
+            assert_eq!(value, original, "{name}:\n{out}");
+            assert_eq!(key_order(&value), order, "{name}:\n{out}");
+        }
+    }
+
+    /// Keys and values JSON cannot hold: an integer key, a null key, a
+    /// sequence key, `.inf` and `.nan`.
+    const JSON_HOSTILE_AGENT: &str = "agent:
+  v: 1
+  state: done
+  1: integer key
+  ~: null key
+  ? [a, b]
+  : sequence key
+  big: .inf
+  odd: .nan
+  nested: {2: two, ~: none}
+";
+
+    #[test]
+    fn agent_values_survive_the_json_cache_and_a_later_write() {
+        let text = agent_file(JSON_HOSTILE_AGENT);
+        let original = agent_value(&text);
+        let tip = Tip::parse("survey.md", Some("s1".into()), &text).unwrap();
+        // What `save_cache` and the board emit do: never fails.
+        let json = serde_json::to_string(&vec![tip.clone()]).expect("the board serialises");
+        // What `load_cache` does, then a board write from the cached copy.
+        let cached: Vec<Tip> = serde_json::from_str(&json).unwrap();
+        assert_eq!(cached[0], tip);
+        for (name, written) in board_writes(&cached[0]) {
+            let out = written.to_markdown().unwrap();
+            let value = agent_value(&out);
+            assert_eq!(value, original, "{name}:\n{out}");
+            assert_eq!(key_order(&value), key_order(&original), "{name}:\n{out}");
+        }
+    }
+
+    #[test]
+    fn old_cache_entries_still_load() {
+        // 0.5.3: no agent data at all.
+        let plain = serde_json::json!({
+            "id": "p", "path": "p.md", "sha": "s1", "title": "Plain",
+            "kind": "task", "priority": "normal", "status": "open",
+            "body": "x", "remind_at": [],
+        });
+        let tip: Tip = serde_json::from_value(plain).unwrap();
+        assert_eq!(tip.sha.as_deref(), Some("s1"));
+        assert!(tip.front.agent.is_none());
+        // The pre-release agent build: the whole map as a JSON object. It
+        // loads, and its stamp is dropped so the file is read again before
+        // anything writes it (the JSON copy may have lost key order).
+        let old = serde_json::json!({
+            "id": "a", "path": "a.md", "sha": "s2", "title": "Agent",
+            "kind": "agent", "priority": "normal", "status": "open",
+            "agent": { "v": 1, "state": "done", "hash": "sha256:x", "zz": "keep" },
+            "agent_state": "done", "body": "x", "remind_at": [],
+        });
+        let tip: Tip = serde_json::from_value(old).unwrap();
+        assert_eq!(tip.front.kind, Kind::Agent);
+        assert!(tip.front.agent.is_some());
+        assert_eq!(tip.agent_state, Some(AgentState::Queued));
+        assert_eq!(tip.sha, None);
+    }
+
     #[test]
     fn agent_fields_travel_through_json() {
         let tip = Tip::parse("survey.md", Some("s1".into()), &agent_file(AGENT_BLOCK)).unwrap();
@@ -1086,17 +1257,36 @@ due: 2026-11-20
         assert_eq!(json["agent_state"], "question");
         assert_eq!(json["agent"]["v"], 1);
         assert_eq!(json["agent"]["host"], "DESKTOP-ABC");
-        assert_eq!(json["agent"]["zz_future"]["nested"][1], 2);
+        assert_eq!(
+            json["agent"]["results"],
+            "agent/survey-hairpin-ac-loss-papers/"
+        );
+        // The UI gets the view only; the whole map travels as YAML text.
+        assert!(json["agent"].get("zz_future").is_none());
+        let yaml = json["agent_yaml"].as_str().unwrap();
+        assert!(
+            yaml.contains("zz_future:") && yaml.contains("zz_note: keep me"),
+            "{yaml}"
+        );
         let back: Tip = serde_json::from_value(json).unwrap();
         assert_eq!(back, tip);
+        assert_eq!(back.sha.as_deref(), Some("s1"));
         // A stale `agent_state` in the JSON is ignored: it is always derived.
         let mut stale = serde_json::to_value(&tip).unwrap();
         stale["agent_state"] = "done".into();
         let back: Tip = serde_json::from_value(stale).unwrap();
         assert_eq!(back.agent_state, Some(AgentState::Question));
-        // Non-agent tips carry neither field.
+        // Non-agent tips carry none of the fields.
         let plain = serde_json::to_value(Tip::parse("p.md", None, SAMPLE).unwrap()).unwrap();
         assert!(plain.get("agent").is_none() && plain.get("agent_state").is_none());
+        assert!(plain.get("agent_yaml").is_none());
+        // A cached `agent_yaml` that does not parse: no map, and no stamp,
+        // so the file is read again before anything writes it.
+        let mut broken = serde_json::to_value(&tip).unwrap();
+        broken["agent_yaml"] = "v: [unclosed".into();
+        let back: Tip = serde_json::from_value(broken).unwrap();
+        assert!(back.front.agent.is_none());
+        assert_eq!(back.sha, None);
     }
 
     #[test]

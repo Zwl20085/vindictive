@@ -914,6 +914,36 @@ more
     }
 
     #[test]
+    fn agent_maps_json_cannot_hold_survive_the_cache_and_a_restart() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        let text = "---\ntitle: S\nkind: agent\nagent:\n  state: done\n  1: int key\n  ~: null key\n  big: .inf\n  v: 1\n---\nP\n";
+        let tip = Tip::parse("s.md", Some("1".into()), text).unwrap();
+        // Saving the cache (and the board emit) goes through JSON: no error.
+        state.update_board(|b| b.upsert(tip.clone()));
+        assert!(state
+            .storage()
+            .save_cache(std::slice::from_ref(&tip))
+            .is_ok());
+        // A restart loads the board from the cache, stamp kept.
+        let restarted = AppState::load(Storage::new(data.path().to_path_buf()));
+        let cached = restarted.tip("s").unwrap();
+        assert_eq!(cached.sha.as_deref(), Some("1"));
+        let written = cached.complete(now()).to_markdown().unwrap();
+        assert_eq!(
+            Tip::parse("s.md", None, &written).unwrap().front.agent,
+            tip.front.agent
+        );
+        assert!(
+            written.contains(
+                "agent:\n  state: done\n  1: int key\n  null: null key\n  big: .inf\n  v: 1\n"
+            ),
+            "{written}"
+        );
+    }
+
+    #[test]
     fn upsert_and_lookup_without_copying_the_board() {
         let folder = tempfile::tempdir().unwrap();
         let data = tempfile::tempdir().unwrap();

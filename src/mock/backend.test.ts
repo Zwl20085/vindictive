@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { toNaive } from '../lib/time';
 import type { Tip, TipEdit } from '../types';
 import { withAgentState } from '../lib/agent';
-import { mockInvoke, nextOccurrence, parseCaptureText } from './backend';
+import { agentResultsRel, mockInvoke, nextOccurrence, parseCaptureText } from './backend';
 
 const now = new Date(2026, 9, 14, 12, 0, 0); // Wed 14 Oct 2026
 
@@ -237,3 +237,24 @@ describe('mock agent tips', () => {
 function emptyForm(): TipEdit {
   return { title: '', kind: 'task', priority: 'normal', due: null, location: null, tags: [], remind: [], repeat: null, links: [], images: [], color: null, size: null, highlight: [], body: '' };
 }
+
+describe('mock open_agent_results', () => {
+  it('opens only a results folder under agent/, like the backend', async () => {
+    await expect(mockInvoke('open_agent_results', { id: 'agent-survey-hairpin' })).resolves.toBeUndefined();
+    const made = await mockInvoke('create_tip_full', { edit: { ...emptyForm(), title: 'No results yet', kind: 'agent' } });
+    const id = made.tips.find((t) => t.title === 'No results yet')?.id ?? '';
+    await expect(mockInvoke('open_agent_results', { id })).rejects.toThrow(/has not recorded a results folder/);
+    await expect(mockInvoke('open_agent_results', { id: 'missing' })).rejects.toThrow(/not found/);
+  });
+
+  it('applies the backend path rule', () => {
+    expect(agentResultsRel('agent/survey/')).toBe('agent/survey');
+    expect(agentResultsRel(' agent\\survey\\deep ')).toBe('agent/survey/deep');
+    for (const outside of ['agent', 'agent/', 'survey/', 'figures/x', 'Agent/x', 'x/agent/y']) {
+      expect(() => agentResultsRel(outside), outside).toThrow(/under agent\//);
+    }
+    for (const bad of ['', '  ', '/', '/etc/passwd', '\\\\server\\share', 'C:\\Windows', 'C:agent', 'agent/../../x', '..', './agent', 'agent/./x', 'agent/x:stream']) {
+      expect(() => agentResultsRel(bad), bad).toThrow();
+    }
+  });
+});

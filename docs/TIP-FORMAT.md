@@ -187,7 +187,9 @@ Survey recent papers on AC copper loss in hairpin windings.
 
 - **The `agent` map is read-only for the board.** Every board action (the
   Edit form, Done, reopen, snooze, colour, size, drag, fetching paper
-  metadata) keeps it, including sub-keys the board does not know. The Edit
+  metadata) keeps it, including sub-keys the board does not know. Its values
+  and key order are kept, nulls and empty values included; the quoting style
+  is not (the board rewrites the frontmatter as for every other key). The Edit
   form has no field for it. Changing the kind away from `agent` keeps the
   map too (the tip just stops showing a badge); change it back and the
   badge returns. A malformed value (not a map, wrong types) does not

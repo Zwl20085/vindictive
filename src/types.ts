@@ -26,8 +26,9 @@ export interface Paper {
 }
 
 /**
- * The `agent` frontmatter map as the runner writes it (protocol section 2).
- * Read-only for the board. Unknown sub-keys pass through as extra keys.
+ * The keys of the `agent` frontmatter map the board reads (protocol
+ * section 2). The backend sends only these, and only when they hold text,
+ * finite numbers or booleans; the map itself stays in the backend.
  */
 export interface AgentMeta {
   v?: number;
@@ -79,11 +80,15 @@ export interface Tip {
   /** Words or phrases to highlight on this tip's tile and body. */
   highlight?: string[];
   /**
-   * The `agent` map, verbatim. Normally an `AgentMeta`, but a hand-broken
-   * file can carry any YAML value here (it is preserved, not rejected), so
-   * read it through `src/lib/agent.ts`.
+   * Read-only view of the `agent` map: an `AgentMeta`, present when the
+   * file's `agent` value is a map. A hand-broken value is still kept in the
+   * file but shows up here as absent or partial, so read it through
+   * `src/lib/agent.ts`.
    */
   agent?: unknown;
+  /** The whole `agent` value as YAML text. Backend-internal (the offline
+   *  cache rebuilds the map from it); the UI never reads it. */
+  agent_yaml?: string;
 
   /** Markdown body. */
   body: string;
