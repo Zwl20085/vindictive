@@ -18,6 +18,7 @@ export const KIND_COLORS: Record<Exclude<Kind, 'deadline'>, string> = {
   event: '#2C5F58', // deep teal
   note: '#3A4356', // slate
   reading: '#8C4A22', // burnt orange
+  agent: '#34557A', // steel blue
 };
 
 export const DEADLINE_COLORS: Record<Exclude<Urgency, 'overdue'>, string> = {

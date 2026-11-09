@@ -19,11 +19,13 @@ export function isTileSize(value: unknown): value is TileSize {
 
 /**
  * An explicit `size` wins. Otherwise `wide` for the next-up tip, `md` for
- * high priority or a deadline within seven days, `sm` for the rest.
+ * an agent tip with a question, high priority or a deadline within seven
+ * days, `sm` for the rest.
  */
 export function tileSize(tip: Tip, isNextUp: boolean, now: Date): TileSize {
   if (isTileSize(tip.size)) return tip.size;
   if (isNextUp) return 'wide';
+  if (tip.agent_state === 'question') return 'md';
   if (tip.priority === 'high') return 'md';
   const urgency = urgencyOf(parseNaive(tip.due_at), now);
   const dueSoon = urgency === 'soon' || urgency === 'critical' || urgency === 'overdue';

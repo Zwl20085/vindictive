@@ -1,4 +1,5 @@
 import type { Tip } from '../types';
+import { AGENT_BADGE, agentStateLabel } from '../lib/agent';
 import { locale, t } from '../lib/i18n';
 import { isRelativeSrc } from '../lib/markdown';
 import { countdown, parseNaive } from '../lib/time';
@@ -52,6 +53,7 @@ function countdownText(tip: Tip, now: Date): string | undefined {
 
 function ariaLabel(tip: Tip, cd: string | undefined, isNextUp: boolean): string {
   const parts = [labelFor(tip.kind), tip.title];
+  if (tip.agent_state) parts.push(agentStateLabel(tip.agent_state));
   if (cd) parts.push(cd);
   if (isNextUp) parts.unshift(t('nextUp'));
   if (warningsOf(tip).length) parts.push(t('tileWarnings'));
@@ -63,11 +65,25 @@ function warningsOf(tip: Tip): string[] {
   return (tip.warnings ?? []).filter((w) => w.trim().length > 0);
 }
 
+/** The agent state badge: an emoji with its meaning in words for hover and screen readers. */
+function agentBadge(tip: Tip): HTMLElement | null {
+  if (!tip.agent_state) return null;
+  const words = agentStateLabel(tip.agent_state);
+  return el('span', {
+    className: 'tile-agent-badge',
+    role: 'img',
+    'aria-label': words,
+    title: words,
+    text: AGENT_BADGE[tip.agent_state],
+  });
+}
+
 function topRow(tip: Tip, cd: string | undefined, isNextUp: boolean): HTMLElement {
   return el(
     'span',
     { className: 'tile-top' },
     isNextUp ? el('span', { className: 'tile-next', text: t('next') }) : null,
+    agentBadge(tip),
     cd ? el('span', { className: 'tile-countdown', text: cd }) : null,
     warningsOf(tip).length ? el('span', { className: 'tile-warn', 'aria-hidden': 'true', text: '!' }) : null,
     el('span', { className: 'tile-glyph', 'aria-hidden': 'true', text: KIND_GLYPH[tip.kind] }),
@@ -160,6 +176,7 @@ export function renderTile(options: TileOptions): HTMLButtonElement {
   if (isNextUp) classes.push('tile-is-next');
   if (colour.overdue) classes.push('tile-overdue');
   if (tip.status === 'done') classes.push('tile-done');
+  if (tip.agent_state) classes.push(`tile-agent-${tip.agent_state}`);
   if (enterIndex !== undefined) classes.push('tile-enter');
 
   const button = el(

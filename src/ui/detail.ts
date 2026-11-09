@@ -1,4 +1,5 @@
 import type { Settings, Tip } from '../types';
+import { AGENT_BADGE, agentInfo, agentStateLabel } from '../lib/agent';
 import { locale, t } from '../lib/i18n';
 import { countdown, formatLocal, minutesUntilTomorrowMorning, parseNaive } from '../lib/time';
 import { DEADLINE_COLORS, KIND_COLORS, OVERDUE_COLOR, tileColor } from '../lib/tileColor';
@@ -32,6 +33,8 @@ export interface DetailActions {
   onOpenLink: (url: string) => void;
   /** Show the tip's file in Explorer. */
   onReveal: (id: string) => void;
+  /** Open the agent's results folder (`agent.results`). */
+  onOpenResults: (id: string) => void;
   onBack: () => void;
   /** Figure resolver; the tip's sha is passed as the cache version. */
   resolveImage: VersionedResolver;
@@ -89,6 +92,27 @@ function metaRows(tip: Tip, words: readonly string[]): HTMLElement | null {
   return rows.length ? el('ul', { className: 'detail-meta' }, ...rows) : null;
 }
 
+/** Agent state in words, where and when it last changed, and the results. */
+function agentBlock(tip: Tip, onOpenResults: (id: string) => void): HTMLElement | null {
+  if (tip.kind !== 'agent') return null;
+  const info = agentInfo(tip);
+  const state = tip.agent_state;
+  const at = parseNaive(info.at);
+  const rows = [
+    state ? metaRow(t('kind_agent'), `${AGENT_BADGE[state]} ${agentStateLabel(state)}`) : null,
+    info.host ? metaRow(t('agentHost'), info.host) : null,
+    info.at ? metaRow(t('agentAt'), at ? formatLocal(at, locale()) : info.at) : null,
+  ].filter((r): r is HTMLElement => !!r);
+  let open: HTMLButtonElement | null = null;
+  if (info.results) {
+    open = el('button', { className: 'link-button detail-agent-results', type: 'button', text: t('openResults'), title: info.results });
+    open.addEventListener('click', () => onOpenResults(tip.id));
+  }
+  if (!rows.length && !open) return null;
+  const classes = ['detail-agent', state ? `detail-agent-${state}` : ''].filter(Boolean).join(' ');
+  return el('section', { className: classes }, rows.length ? el('ul', { className: 'detail-meta' }, ...rows) : null, open);
+}
+
 function paperBlock(tip: Tip, onOpenLink: (url: string) => void): HTMLElement | null {
   const paper = tip.paper;
   const ref = tip.arxiv ? `arXiv:${tip.arxiv}` : tip.doi ? `doi:${tip.doi}` : undefined;
@@ -112,6 +136,7 @@ export const SWATCHES: readonly string[] = [
   KIND_COLORS.event,
   KIND_COLORS.note,
   KIND_COLORS.reading,
+  KIND_COLORS.agent,
   DEADLINE_COLORS.later,
   DEADLINE_COLORS.soon,
   DEADLINE_COLORS.critical,
@@ -329,6 +354,7 @@ export function renderDetail(options: DetailOptions): HTMLElement {
     ...[
       warningsBlock(tip),
       metaRows(tip, words),
+      agentBlock(tip, actions.onOpenResults),
       paperBlock(tip, actions.onOpenLink),
       figures(tip, resolve),
       body(tip, words, resolve, actions.onOpenLink),

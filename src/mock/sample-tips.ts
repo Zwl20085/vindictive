@@ -157,6 +157,29 @@ export function sampleTips(now: Date): Tip[] {
       body: 'Be polite. Attach the updated Fig. 4.',
     },
     {
+      // Hash of the body below, so it shows as finished (docs/AGENT-PROTOCOL.md).
+      id: 'agent-survey-hairpin',
+      path: 'tips/agent-survey-hairpin.md',
+      title: 'Survey hairpin AC loss papers',
+      kind: 'agent',
+      priority: 'normal',
+      status: 'open',
+      remind_at: [],
+      agent: {
+        v: 1,
+        state: 'done',
+        hash: 'sha256:0d2a2d7c06ce0e40a41eee2eb1b24516dce18debf5f982f7a6c5acb59cc1acf8',
+        host: 'DESKTOP-ABC',
+        run: '20261109-193100-ab12',
+        at: '2026-11-09T19:31:00',
+        results: 'agent/survey-hairpin-ac-loss-papers/',
+        zz_future: 'kept',
+      },
+      agent_state: 'done',
+      body:
+        'Find three recent papers on hairpin AC loss.\n\n<!-- agent:begin 2026-11-09T19:31:00 done -->\n## ⭐ Result · 2026-11-09 19:31\nFound 14 papers; the summary table is in `survey.md`.\n<!-- agent:end -->\n',
+    },
+    {
       id: 'done-calibrate-scope',
       path: 'tips/done-calibrate-scope.md',
       title: 'Calibrate the oscilloscope probes',

@@ -4,14 +4,16 @@
 
 use std::path::{Path, PathBuf};
 
+use vindictive_lib::core::agent::AgentState;
 use vindictive_lib::core::tip::{Kind, Tip};
 
-const ALL_KINDS: [Kind; 5] = [
+const ALL_KINDS: [Kind; 6] = [
     Kind::Task,
     Kind::Deadline,
     Kind::Note,
     Kind::Reading,
     Kind::Event,
+    Kind::Agent,
 ];
 
 fn examples_dir() -> PathBuf {
@@ -86,6 +88,11 @@ fn all_example_tips_parse_and_roundtrip() {
             "{} did not round-trip",
             path.display()
         );
+        if tip.id == "agent-survey-example" {
+            // Its `agent.hash` is the true body hash, so the board shows ⭐.
+            assert_eq!(tip.agent_state, Some(AgentState::Done));
+            assert_eq!(again.agent_state, Some(AgentState::Done));
+        }
         parsed += 1;
     }
     assert_eq!(

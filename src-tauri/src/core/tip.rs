@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
+use super::agent::{self, Agent, AgentState};
 use super::frontmatter::{join, split, FrontmatterError};
 use super::timeparse::{format_dt, is_offset, parse_due, parse_remind};
 
@@ -17,6 +18,8 @@ pub enum Kind {
     Note,
     Reading,
     Event,
+    /// A task for an AI agent, see `docs/AGENT-PROTOCOL.md`.
+    Agent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Default)]
@@ -44,6 +47,7 @@ lenient::enum_deserialize!(Kind {
     "note" => Note,
     "reading" => Reading,
     "event" => Event,
+    "agent" => Agent,
 });
 lenient::enum_deserialize!(Priority {
     "low" => Low,
@@ -275,6 +279,14 @@ pub struct FrontMatter {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub highlight: Vec<String>,
+    /// Agent run state, written only by the runner (`docs/AGENT-PROTOCOL.md`).
+    /// The board never changes it; any value, even a malformed one, is kept.
+    #[serde(
+        default,
+        deserialize_with = "agent::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub agent: Option<Agent>,
     /// Any keys we do not understand are preserved verbatim.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_yaml::Value>,
@@ -308,10 +320,13 @@ pub struct Tip {
     /// not parse. Derived, never written to the file.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Derived agent display state (protocol section 5); never written to the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_state: Option<AgentState>,
 }
 
 /// Top-level JSON keys of a `Tip` besides the frontmatter ones.
-const TIP_KEYS: [&str; 9] = [
+const TIP_KEYS: [&str; 10] = [
     "id",
     "path",
     "sha",
@@ -320,6 +335,7 @@ const TIP_KEYS: [&str; 9] = [
     "remind_at",
     "snoozed_until_at",
     "warnings",
+    "agent_state",
     "shadowed",
 ];
 
@@ -346,6 +362,9 @@ struct TipJson {
     snoozed_until_at: Option<NaiveDateTime>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
+    /// Output only: recomputed from the frontmatter and body on the way in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_state: Option<AgentState>,
 }
 
 impl From<Tip> for TipJson {
@@ -366,6 +385,7 @@ impl From<Tip> for TipJson {
             remind_at: tip.remind_at,
             snoozed_until_at: tip.snoozed_until_at,
             warnings: tip.warnings,
+            agent_state: tip.agent_state,
         }
     }
 }
@@ -374,6 +394,7 @@ impl From<TipJson> for Tip {
     fn from(json: TipJson) -> Self {
         let mut front = json.front;
         front.extra.extend(json.shadowed);
+        let agent_state = agent_state_of(&front, &json.body);
         Tip {
             id: json.id,
             path: json.path,
@@ -384,6 +405,7 @@ impl From<TipJson> for Tip {
             remind_at: json.remind_at,
             snoozed_until_at: json.snoozed_until_at,
             warnings: json.warnings,
+            agent_state,
         }
     }
 }
@@ -448,6 +470,7 @@ impl Tip {
                 warnings.push(format!("repeat: cannot parse {rule:?}"));
             }
         }
+        let agent_state = agent_state_of(&front, &body);
         Tip {
             id,
             path: path.to_string(),
@@ -458,6 +481,7 @@ impl Tip {
             remind_at,
             snoozed_until_at,
             warnings,
+            agent_state,
         }
     }
 
@@ -534,6 +558,21 @@ impl Tip {
         front.paper = Some(paper);
         self.with_front(front)
     }
+
+    /// The tip with fetched paper metadata, as `enrich` saves it: a plain
+    /// task becomes a reading tip; every other kind is kept.
+    pub fn enriched(&self, paper: Paper) -> Tip {
+        let mut front = self.front.clone();
+        front.paper = Some(paper);
+        if front.kind == Kind::Task {
+            front.kind = Kind::Reading;
+        }
+        self.with_front(front)
+    }
+}
+
+fn agent_state_of(front: &FrontMatter, body: &str) -> Option<AgentState> {
+    agent::display_state(front.kind == Kind::Agent, front.agent.as_ref(), body)
 }
 
 pub fn id_from_path(path: &str) -> String {
@@ -573,6 +612,7 @@ pub fn slugify(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::frontmatter::split;
 
     fn dt(s: &str) -> NaiveDateTime {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap()
@@ -746,6 +786,335 @@ body
         let text = "---\ntitle: read this\nkind: reading\narxiv: 2401.00001\npaper:\n  title: A Great Paper\n  authors: [A, B]\n---\n";
         let tip = Tip::parse("p.md", None, text).unwrap();
         assert_eq!(tip.display_title(), "A Great Paper");
+    }
+
+    const AGENT_BLOCK: &str = "agent:
+  v: 1
+  state: question
+  hash: sha256:262828d169635feb78f04a5a63dde71f681a21c534598a9b19556af76446b9ac
+  host: DESKTOP-ABC
+  run: 20261109-073100-ab12
+  at: 2026-11-09T07:31:00
+  results: agent/survey-hairpin-ac-loss-papers/
+  zz_future:
+    nested:
+    - 1
+    - 2
+  zz_note: keep me
+";
+    const AGENT_BODY: &str = "Prompt
+
+<!-- agent:begin 2026-11-09T07:31:00 question -->
+## ❓ Questions
+1. Which year range?
+<!-- agent:end -->
+
+2020 onwards
+";
+
+    fn agent_file(agent_yaml: &str) -> String {
+        format!(
+            "---
+title: Survey
+kind: agent
+status: open
+due: 2026-11-20
+{agent_yaml}---
+
+{AGENT_BODY}"
+        )
+    }
+
+    /// The full Edit form as the frontend fills it for `tip`: every field
+    /// shows the file's value. There is no `agent` field.
+    fn form_of(tip: &Tip) -> super::super::edit::TipEdit {
+        let f = &tip.front;
+        super::super::edit::TipEdit {
+            title: f.title.clone(),
+            kind: f.kind,
+            priority: f.priority,
+            due: f.due.clone(),
+            location: f.location.clone(),
+            tags: f.tags.clone(),
+            remind: f.remind.clone(),
+            repeat: f.repeat.clone(),
+            links: f.links.clone(),
+            images: f.images.clone(),
+            color: f.color.clone(),
+            size: f.size.clone(),
+            highlight: f.highlight.clone(),
+            body: tip.body.clone(),
+        }
+    }
+
+    /// Every way the board rewrites an existing tip, as the commands build
+    /// them (none of them touches the body):
+    /// `update_tip` (the full Edit form, saved unchanged and with every field
+    /// changed), `mark_done` (plain and recurring), `reopen`, `snooze`,
+    /// `set_color`, `set_size`, `set_order` and `enrich_tip`.
+    fn board_writes(tip: &Tip) -> Vec<(&'static str, Tip)> {
+        use super::super::edit::{apply, TipEdit};
+        let now = dt("2026-11-09 08:00");
+        let all_changed = TipEdit {
+            title: "Survey, renamed".into(),
+            kind: Kind::Agent,
+            priority: Priority::High,
+            due: Some("2026-11-21 17:00".into()),
+            location: Some("Lab 302".into()),
+            tags: vec!["lit".into()],
+            remind: vec!["-1d".into()],
+            repeat: Some("weekly on mon".into()),
+            links: vec!["https://example.org".into()],
+            images: vec!["figures/plot.png".into()],
+            color: Some("#4A3B6B".into()),
+            size: Some("wide".into()),
+            highlight: vec!["hairpin".into()],
+            ..form_of(tip)
+        };
+        let with = |f: fn(&mut FrontMatter)| {
+            let mut front = tip.front.clone();
+            f(&mut front);
+            tip.with_front(front)
+        };
+        let recurring = with(|f| f.repeat = Some("weekly on mon".into()));
+        let paper = Paper {
+            title: "A paper".into(),
+            ..Default::default()
+        };
+        vec![
+            ("update_tip unchanged", apply(tip, form_of(tip)).unwrap()),
+            ("update_tip all fields", apply(tip, all_changed).unwrap()),
+            ("mark_done", tip.complete(now)),
+            ("mark_done recurring", recurring.complete(now)),
+            ("reopen", tip.complete(now).reopen()),
+            ("snooze", tip.snooze_until(now)),
+            ("set_color", with(|f| f.color = Some("#4A3B6B".into()))),
+            ("set_size", with(|f| f.size = Some("wide".into()))),
+            ("set_order", with(|f| f.order = Some(1.5))),
+            ("enrich_tip", tip.enriched(paper)),
+        ]
+    }
+
+    /// `AGENT_BLOCK` as the runner leaves it after a finished run: state
+    /// `done` and the hash of the current body, so the board shows ⭐.
+    fn done_block() -> String {
+        AGENT_BLOCK
+            .replace("state: question", "state: done")
+            .replace(
+                "sha256:262828d169635feb78f04a5a63dde71f681a21c534598a9b19556af76446b9ac",
+                &agent::body_hash(AGENT_BODY),
+            )
+    }
+
+    #[test]
+    fn board_writes_keep_a_finished_agent_tip_finished() {
+        let block = done_block();
+        let tip = Tip::parse("survey.md", Some("s1".into()), &agent_file(&block)).unwrap();
+        assert_eq!(tip.agent_state, Some(AgentState::Done));
+        for (name, written) in board_writes(&tip) {
+            let text = written.to_markdown().unwrap();
+            assert_eq!(agent_lines(&text), block, "{name}:\n{text}");
+            let again = Tip::parse("survey.md", None, &text).unwrap();
+            assert_eq!(again.body, tip.body, "{name}");
+            // Marking it Done retires the task but does not change what
+            // the badge says about the last run.
+            assert_eq!(written.agent_state, Some(AgentState::Done), "{name}");
+            assert_eq!(again.agent_state, Some(AgentState::Done), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_body_edit_requeues_the_agent_tip_and_keeps_the_map() {
+        use super::super::edit::{apply, TipEdit};
+        let block = done_block();
+        let tip = Tip::parse("survey.md", Some("s1".into()), &agent_file(&block)).unwrap();
+        let answer = TipEdit {
+            body: format!("{AGENT_BODY}\nAlso 2019, please.\n"),
+            ..form_of(&tip)
+        };
+        let edited = apply(&tip, answer).unwrap();
+        assert_eq!(edited.agent_state, Some(AgentState::Queued));
+        let text = edited.to_markdown().unwrap();
+        assert_eq!(agent_lines(&text), block, "{text}");
+        let again = Tip::parse("survey.md", None, &text).unwrap();
+        assert_eq!(again.front.agent, tip.front.agent);
+        assert_eq!(again.agent_state, Some(AgentState::Queued));
+        // Whitespace-only changes do not count as an edit (protocol section 4).
+        let spaced = TipEdit {
+            body: format!("\n{}  \r\n\n", AGENT_BODY.trim_end()),
+            ..form_of(&tip)
+        };
+        assert_eq!(
+            apply(&tip, spaced).unwrap().agent_state,
+            Some(AgentState::Done)
+        );
+    }
+
+    #[test]
+    fn changing_the_kind_away_from_agent_keeps_the_map() {
+        use super::super::edit::{apply, TipEdit};
+        let block = done_block();
+        let tip = Tip::parse("survey.md", Some("s1".into()), &agent_file(&block)).unwrap();
+        let task = apply(
+            &tip,
+            TipEdit {
+                kind: Kind::Task,
+                ..form_of(&tip)
+            },
+        )
+        .unwrap();
+        // Not an agent tip any more: no display state, but the map stays
+        // exactly as the runner wrote it (the board never removes it).
+        assert_eq!(task.front.kind, Kind::Task);
+        assert_eq!(task.agent_state, None);
+        let text = task.to_markdown().unwrap();
+        assert_eq!(agent_lines(&text), block, "{text}");
+        // Switching back brings the old state back, since nothing was lost.
+        let back = apply(
+            &task,
+            TipEdit {
+                kind: Kind::Agent,
+                ..form_of(&task)
+            },
+        )
+        .unwrap();
+        assert_eq!(back.front.agent, tip.front.agent);
+        assert_eq!(back.agent_state, Some(AgentState::Done));
+    }
+
+    fn agent_lines(markdown: &str) -> String {
+        let mut out = String::new();
+        let mut inside = false;
+        for line in markdown.lines() {
+            if line == "---" && inside {
+                break;
+            }
+            if line.starts_with("agent:") {
+                inside = true;
+            } else if inside && !line.starts_with(' ') && !line.starts_with('-') {
+                break;
+            }
+            if inside {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn agent_map_survives_every_board_write_byte_for_byte() {
+        let tip = Tip::parse("survey.md", Some("s1".into()), &agent_file(AGENT_BLOCK)).unwrap();
+        assert_eq!(tip.front.kind, Kind::Agent);
+        assert!(matches!(tip.front.agent, Some(Agent::Typed(_))));
+        assert_eq!(tip.agent_state, Some(AgentState::Question));
+        for (name, written) in board_writes(&tip) {
+            let text = written.to_markdown().unwrap();
+            assert_eq!(
+                agent_lines(&text),
+                AGENT_BLOCK,
+                "{name}:
+{text}"
+            );
+            let again = Tip::parse("survey.md", None, &text).unwrap();
+            assert_eq!(again.front.agent, tip.front.agent, "{name}");
+            assert_eq!(again.body, tip.body, "{name}");
+        }
+    }
+
+    #[test]
+    fn malformed_agent_values_stay_readable_and_are_kept() {
+        for agent_yaml in [
+            "agent: [not, a, map]
+",
+            "agent: just text
+",
+            "agent: null
+",
+            "agent:
+  v: one
+  state: done
+  host: 42
+",
+            "agent:
+  v: 1
+  state: {weird: yes}
+",
+        ] {
+            let text = agent_file(agent_yaml);
+            let tip = Tip::parse("survey.md", None, &text).unwrap();
+            let original: serde_yaml::Value =
+                serde_yaml::from_str(split(&text).unwrap().0).unwrap();
+            assert!(tip.front.agent.is_some(), "{agent_yaml}");
+            assert_eq!(tip.agent_state, Some(AgentState::Queued), "{agent_yaml}");
+            for (name, written) in board_writes(&tip) {
+                let out = written.to_markdown().unwrap();
+                let value: serde_yaml::Value =
+                    serde_yaml::from_str(split(&out).unwrap().0).unwrap();
+                assert_eq!(
+                    value["agent"], original["agent"],
+                    "{name} {agent_yaml}:
+{out}"
+                );
+            }
+        }
+    }
+
+    /// The lenient frontmatter rules and the lenient `agent` map agree: a
+    /// hand-written file with loose values elsewhere, a mixed-case kind and a
+    /// malformed map still loads, with warnings only for what the board
+    /// itself resolves (here a bad `due`), never for the runner's map.
+    #[test]
+    fn lenient_frontmatter_and_a_malformed_agent_map_load_together() {
+        let text = "---\ntitle: 2024\nkind: ' Agent '\npriority: HIGH\ndue: someday\ntags: lab\nagent: [not, a, map]\n---\nPrompt\n";
+        let tip = Tip::parse("x.md", None, text).unwrap();
+        assert_eq!(tip.front.title, "2024");
+        assert_eq!(tip.front.kind, Kind::Agent);
+        assert_eq!(tip.front.tags, vec!["lab"]);
+        assert_eq!(tip.agent_state, Some(AgentState::Queued));
+        assert_eq!(tip.warnings, vec![r#"due: cannot parse "someday""#]);
+        let out = tip.to_markdown().unwrap();
+        assert!(out.contains("kind: agent\n"), "{out}");
+        assert!(out.contains("agent:\n- not\n- a\n- map\n"), "{out}");
+    }
+
+    #[test]
+    fn agent_fields_travel_through_json() {
+        let tip = Tip::parse("survey.md", Some("s1".into()), &agent_file(AGENT_BLOCK)).unwrap();
+        let json = serde_json::to_value(&tip).unwrap();
+        assert_eq!(json["kind"], "agent");
+        assert_eq!(json["agent_state"], "question");
+        assert_eq!(json["agent"]["v"], 1);
+        assert_eq!(json["agent"]["host"], "DESKTOP-ABC");
+        assert_eq!(json["agent"]["zz_future"]["nested"][1], 2);
+        let back: Tip = serde_json::from_value(json).unwrap();
+        assert_eq!(back, tip);
+        // A stale `agent_state` in the JSON is ignored: it is always derived.
+        let mut stale = serde_json::to_value(&tip).unwrap();
+        stale["agent_state"] = "done".into();
+        let back: Tip = serde_json::from_value(stale).unwrap();
+        assert_eq!(back.agent_state, Some(AgentState::Question));
+        // Non-agent tips carry neither field.
+        let plain = serde_json::to_value(Tip::parse("p.md", None, SAMPLE).unwrap()).unwrap();
+        assert!(plain.get("agent").is_none() && plain.get("agent_state").is_none());
+    }
+
+    #[test]
+    fn a_frontmatter_key_named_agent_state_is_shadowed_not_lost() {
+        let text = "---
+title: T
+kind: agent
+agent_state: done
+---
+body
+";
+        let tip = Tip::parse("t.md", None, text).unwrap();
+        assert_eq!(tip.agent_state, Some(AgentState::Queued));
+        let json = serde_json::to_value(&tip).unwrap();
+        assert_eq!(json["agent_state"], "queued");
+        assert_eq!(json["shadowed"]["agent_state"], "done");
+        let back: Tip = serde_json::from_value(json).unwrap();
+        assert!(back.to_markdown().unwrap().contains("agent_state: done"));
     }
 
     #[test]

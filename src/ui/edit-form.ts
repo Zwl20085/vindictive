@@ -20,7 +20,7 @@ export const DISCARD_CONFIRM_MS = 2000;
 /** A clock time inside a due string: `09:30`, `9:30`, `T23:59`, `09:30:00`. */
 const DUE_TIME_RE = /(?:^|[\sT])\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?\s*$/i;
 
-const KINDS: readonly Kind[] = ['task', 'deadline', 'note', 'reading', 'event'];
+const KINDS: readonly Kind[] = ['task', 'deadline', 'note', 'reading', 'event', 'agent'];
 const PRIORITIES: readonly Priority[] = ['low', 'normal', 'high'];
 /** Tile size overrides; '' in the select is the default (size by score). */
 const SIZES = ['sm', 'md', 'wide'] as const;

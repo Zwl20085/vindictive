@@ -8,6 +8,7 @@ export const KIND_GLYPH: Record<Kind, string> = {
   note: '≡', // ≡
   reading: '▤', // ▤
   event: '◈', // ◈
+  agent: '◉', // ◉
 };
 
 /** Localised kind label for the active language. */

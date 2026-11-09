@@ -84,6 +84,40 @@
   margin-left: 0;
 }
 
+/* Agent tips: the state badge leads the top row. Waiting, running and
+   failed stay quiet; finished and asking get a bigger badge on a flat dark
+   square so the yellow star and the question mark read from across the room
+   on any tile colour, even at sm size. Nothing animates. */
+.tile-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Segoe UI Emoji', 'Segoe UI Symbol', var(--font);
+  font-size: clamp(11px, 10cqh, 18px);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.tile-agent-done .tile-agent-badge,
+.tile-agent-question .tile-agent-badge {
+  min-width: clamp(18px, 24cqh, 34px);
+  height: clamp(18px, 24cqh, 34px);
+  font-size: clamp(14px, 18cqh, 26px);
+  background: rgb(0 0 0 / 0.38);
+}
+
+.tile-agent-done .tile-agent-badge {
+  color: #f5c518; /* yellow even where the star falls back to a text glyph */
+}
+
+.tile-agent-question .tile-agent-badge {
+  color: #ff5a4f;
+}
+
+.tile-agent-failed .tile-agent-badge {
+  color: #ffb648;
+}
+
 /* Titles carry the Evangelion typography. */
 .tile-title {
   position: relative;

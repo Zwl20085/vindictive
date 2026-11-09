@@ -111,7 +111,8 @@ Put files under `figures/`, list them in `images:` above, or embed one inline:
 }
 
 /// A short Markdown skeleton for a new tip of `kind` made with the form and
-/// left without text. Notes start empty.
+/// left without text. Notes start empty, and so do agent tips: their body is
+/// the agent's prompt, so nothing the user did not write may go into it.
 pub fn body_for_kind(kind: Kind, zh: bool) -> String {
     let text = match (kind, zh) {
         (Kind::Task, false) => "- [ ] ",
@@ -122,20 +123,27 @@ pub fn body_for_kind(kind: Kind, zh: bool) -> String {
         (Kind::Reading, true) => "## 为什么读\n\n## 主要论点\n\n## 笔记\n",
         (Kind::Event, false) => "## Agenda\n\n## Notes\n",
         (Kind::Event, true) => "## 议程\n\n## 笔记\n",
-        (Kind::Note, _) => "",
+        (Kind::Note | Kind::Agent, _) => "",
     };
     text.to_string()
 }
 
 /// Full file text for a new tip, plus the parsed tip the board should hold:
 /// the example body, and the commented key reference when `hints` is set.
+/// An agent tip gets no example body: the body is the agent's prompt, so the
+/// title alone is the task until the user writes more.
 pub fn render(
     path: &str,
     front: FrontMatter,
     zh: bool,
     hints: bool,
 ) -> Result<(Tip, String), TipError> {
-    render_with_body(path, front, &body(zh), zh, hints)
+    let example = if front.kind == Kind::Agent {
+        String::new()
+    } else {
+        body(zh)
+    };
+    render_with_body(path, front, &example, zh, hints)
 }
 
 /// Like `render`, with the given body instead of the example one.
@@ -188,6 +196,25 @@ mod tests {
     }
 
     #[test]
+    fn agent_tips_get_no_example_body() {
+        let agent = FrontMatter {
+            kind: Kind::Agent,
+            ..front()
+        };
+        for hints in [true, false] {
+            let (tip, text) = render("tips/a.md", agent.clone(), false, hints).unwrap();
+            assert_eq!(tip.front, agent);
+            assert_eq!(tip.body.trim(), "");
+            assert!(!text.contains("## Checklist"));
+            assert!(!text.contains("agent:"), "{text}");
+            assert_eq!(
+                tip.agent_state,
+                Some(crate::core::agent::AgentState::Queued)
+            );
+        }
+    }
+
+    #[test]
     fn chinese_template() {
         let (tip, text) = render("tips/y.md", front(), true, true).unwrap();
         assert!(text.contains("## 清单"));
@@ -221,11 +248,16 @@ mod tests {
             Kind::Reading,
             Kind::Event,
             Kind::Note,
+            Kind::Agent,
         ];
         for zh in [false, true] {
             for kind in kinds {
                 let body = body_for_kind(kind, zh);
-                assert_eq!(body.is_empty(), kind == Kind::Note, "{kind:?} zh={zh}");
+                assert_eq!(
+                    body.is_empty(),
+                    matches!(kind, Kind::Note | Kind::Agent),
+                    "{kind:?} zh={zh}"
+                );
                 let (tip, _) = render_with_body("tips/k.md", front(), &body, zh, false).unwrap();
                 assert_eq!(tip.body.trim(), body.trim(), "{kind:?}");
             }

@@ -14,6 +14,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use super::board::{Board, SyncPlan};
+use super::notify::{self, Toast};
 use super::settings::Settings;
 use super::storage::Storage;
 use crate::core::nextup::{next_up, ordered};
@@ -71,6 +72,9 @@ pub struct Inner {
     pub pending_wipe: bool,
     /// OneDrive conflict copies in the last listing, as one line.
     pub conflicts: Option<String>,
+    /// A scan has completed since start; the first one announces no agent
+    /// news (the cache may be old).
+    pub scanned: bool,
 }
 
 pub struct AppState {
@@ -250,7 +254,7 @@ impl AppState {
     }
 
     fn sync_once<R: Runtime>(&self, app: &AppHandle<R>) -> Result<Vec<String>, String> {
-        let result = self.sync_inner();
+        let result = self.sync_scan();
         let error = match &result {
             Err(e) => Some(e.clone()),
             Ok(_) => self.with(|i| sync_summary(&i.broken, i.conflicts.as_deref())),
@@ -264,14 +268,30 @@ impl AppState {
         if let (Some(e), true) = (&error, error_changed) {
             log::warn!("sync: {e}");
         }
-        if matches!(&result, Ok((true, _))) || error_changed {
+        if matches!(&result, Ok((true, _, _))) || error_changed {
             self.emit(app);
         }
-        result.map(|(_, new_ids)| new_ids)
+        // Shown here rather than by the scheduler so that a sync started by
+        // a command or the tray does not swallow the news.
+        if let Ok((_, _, toasts)) = &result {
+            if !toasts.is_empty() && self.settings().notify_new_tips {
+                toasts
+                    .iter()
+                    .for_each(|t| notify::show(app, &t.title, &t.body));
+            }
+        }
+        result.map(|(_, new_ids, _)| new_ids)
     }
 
     /// `(board changed, ids of new tips)`.
+    #[cfg(test)]
     fn sync_inner(&self) -> Result<(bool, Vec<String>), String> {
+        self.sync_scan()
+            .map(|(changed, new_ids, _)| (changed, new_ids))
+    }
+
+    /// `(board changed, ids of new tips, agent tips that turned ⭐ or ❓)`.
+    fn sync_scan(&self) -> Result<(bool, Vec<String>, Vec<Toast>), String> {
         let store = self.store()?;
         // Board first, listing second: a tip created in between is then in
         // the listing (and read), never mistaken for a deleted one. Only the
@@ -299,7 +319,7 @@ impl AppState {
                     "tips folder is empty but the board has {} tips; waiting for the next scan",
                     seen.len()
                 );
-                return Ok((false, Vec::new()));
+                return Ok((false, Vec::new(), Vec::new()));
             }
         } else {
             self.with(|i| i.pending_wipe = false);
@@ -325,7 +345,8 @@ impl AppState {
         let mut plan = plan(&seen, &listing);
         plan.to_fetch.retain(|path| !skipped.contains(path));
         if plan.to_fetch.is_empty() && plan.removed.is_empty() {
-            return Ok((false, Vec::new()));
+            self.with(|i| i.scanned = true);
+            return Ok((false, Vec::new(), Vec::new()));
         }
         // First tip per path wins, as `Iterator::find` did before.
         let seen: HashMap<&str, &Option<String>> = seen
@@ -356,7 +377,7 @@ impl AppState {
             };
             self.with(|i| i.broken.insert(path.clone(), broken));
         }
-        let (changed, new_ids, tips) = self.with(|i| {
+        let (changed, new_ids, toasts, tips) = self.with(|i| {
             // Apply against the *current* board, skipping any tip a command
             // wrote while the files above were read: that write is newer.
             let current = &i.board;
@@ -375,6 +396,11 @@ impl AppState {
                 .cloned()
                 .collect();
             let had_tips = !current.tips.is_empty();
+            let toasts = if i.scanned {
+                notify::agent_toasts(&current.tips, &fetched)
+            } else {
+                Vec::new()
+            };
             let (next, new_ids) = current.apply(fetched, &removed);
             let changed = next != *current;
             if changed {
@@ -394,14 +420,15 @@ impl AppState {
             } else {
                 Vec::new()
             };
-            (changed, new_ids, tips)
+            i.scanned = true;
+            (changed, new_ids, toasts, tips)
         });
         if changed {
             if let Err(e) = self.storage.save_cache(&tips) {
                 log::warn!("cache not saved: {e}");
             }
         }
-        Ok((changed, new_ids))
+        Ok((changed, new_ids, toasts))
     }
 
     /// Write a tip to its file and update the board with the new stamp.
@@ -715,6 +742,71 @@ title: Fixed now
         state.sync_inner().unwrap();
         assert!(state.with(|i| i.broken.contains_key("gbk.md")));
         assert_eq!(state.sync_inner().unwrap(), (false, vec![]));
+    }
+
+    fn agent_file(state: &str, body: &str) -> String {
+        let hash = crate::core::agent::body_hash(body);
+        format!(
+            "---
+title: Survey
+kind: agent
+agent:
+  v: 1
+  state: {state}
+  hash: {hash}
+---
+{body}"
+        )
+    }
+
+    #[test]
+    fn agent_news_from_other_writers_toasts_after_the_first_scan() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        let store = FolderStore::open(folder.path()).unwrap();
+        // The board starts from a cache in which the tip was still running.
+        let cached = Tip::parse(
+            "survey.md",
+            Some("old".into()),
+            &agent_file(
+                "running", "P
+",
+            ),
+        );
+        state.with(|i| i.board = Board::new(vec![cached.unwrap()]));
+        store
+            .write_text(
+                "survey.md",
+                &agent_file(
+                    "done", "P
+",
+                ),
+                None,
+            )
+            .unwrap();
+        let (changed, _, toasts) = state.sync_scan().unwrap();
+        assert!(changed);
+        assert!(
+            toasts.is_empty(),
+            "the first scan after start announces nothing"
+        );
+
+        // The runner answers with a question (another writer: new stamp).
+        let stamp = state.board().get("survey").unwrap().sha.clone();
+        let asked = agent_file(
+            "question", "P
+
+more
+",
+        );
+        store
+            .write_text("survey.md", &asked, stamp.as_deref())
+            .unwrap();
+        let (_, _, toasts) = state.sync_scan().unwrap();
+        assert_eq!(toasts.len(), 1);
+        assert_eq!(toasts[0].title, "❓ Agent has a question");
+        assert_eq!(state.sync_scan().unwrap(), (false, vec![], vec![]));
     }
 
     fn write_tip(folder: &Path, name: &str, title: &str) {

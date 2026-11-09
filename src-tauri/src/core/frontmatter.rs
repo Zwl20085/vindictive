@@ -72,6 +72,36 @@ mod tests {
     }
 
     #[test]
+    fn fences_are_exactly_three_dashes() {
+        // AGENT-PROTOCOL.md section 9: no trailing spaces on either fence.
+        assert_eq!(
+            split("--- \na: 1\n---\n"),
+            Err(FrontmatterError::MissingOpen)
+        );
+        assert_eq!(
+            split("---\t\na: 1\n---\n"),
+            Err(FrontmatterError::MissingOpen)
+        );
+        assert_eq!(
+            split("---\na: 1\n--- \n"),
+            Err(FrontmatterError::MissingClose)
+        );
+        assert_eq!(
+            split("---\na: 1\n ---\n"),
+            Err(FrontmatterError::MissingClose)
+        );
+        assert_eq!(
+            split("---\na: 1\n----\n"),
+            Err(FrontmatterError::MissingClose)
+        );
+        // A `--- ` line is not the close; the exact one after it is.
+        assert_eq!(
+            split("---\na: 1\n--- \nb: 2\n---\nbody"),
+            Ok(("a: 1\n--- \nb: 2\n", "body"))
+        );
+    }
+
+    #[test]
     fn join_is_inverse_of_split() {
         let text = join("a: 1", "body\n");
         assert_eq!(text, "---\na: 1\n---\n\nbody\n");

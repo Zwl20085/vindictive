@@ -130,6 +130,23 @@
   background: var(--surface);
 }
 
+/* Agent tips: state, host, time and the results link on a surface block. */
+.detail-agent {
+  margin: 8px var(--pad) 0;
+  padding: 8px;
+  background: var(--surface);
+}
+
+.detail-agent .detail-meta {
+  margin: 0;
+  padding: 0;
+}
+
+.detail-agent-results {
+  margin-top: 4px;
+  font-size: clamp(12px, 3.8vw, 14px);
+}
+
 .detail-paper-title {
   margin: 0 0 4px;
   font-weight: var(--weight-strong);

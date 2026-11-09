@@ -7,7 +7,9 @@
  * wall-clock time; never call `Date.parse` with a `Z`.
  */
 
-export type Kind = 'task' | 'deadline' | 'note' | 'reading' | 'event';
+export type Kind = 'task' | 'deadline' | 'note' | 'reading' | 'event' | 'agent';
+/** Derived display state of an agent tip, see docs/AGENT-PROTOCOL.md section 5. */
+export type AgentState = 'queued' | 'running' | 'done' | 'question' | 'failed';
 export type Priority = 'low' | 'normal' | 'high';
 export type Status = 'open' | 'done';
 export type Urgency = 'none' | 'later' | 'soon' | 'critical' | 'overdue';
@@ -21,6 +23,25 @@ export interface Paper {
   year?: number;
   venue?: string;
   url?: string;
+}
+
+/**
+ * The `agent` frontmatter map as the runner writes it (protocol section 2).
+ * Read-only for the board. Unknown sub-keys pass through as extra keys.
+ */
+export interface AgentMeta {
+  v?: number;
+  /** `running | done | question | failed`; absent = never handled. */
+  state?: string;
+  /** `sha256:<hex>` of the normalised body when the runner last wrote. */
+  hash?: string;
+  host?: string;
+  run?: string;
+  /** Naive local `YYYY-MM-DDTHH:MM:SS` of the last state change. */
+  at?: string;
+  /** Results folder relative to the tips folder. */
+  results?: string;
+  [key: string]: unknown;
 }
 
 export interface Tip {
@@ -57,6 +78,12 @@ export interface Tip {
   created?: string;
   /** Words or phrases to highlight on this tip's tile and body. */
   highlight?: string[];
+  /**
+   * The `agent` map, verbatim. Normally an `AgentMeta`, but a hand-broken
+   * file can carry any YAML value here (it is preserved, not rejected), so
+   * read it through `src/lib/agent.ts`.
+   */
+  agent?: unknown;
 
   /** Markdown body. */
   body: string;
@@ -67,6 +94,9 @@ export interface Tip {
   snoozed_until_at?: string;
   /** Problems found reading the frontmatter, e.g. a `due` that does not parse. */
   warnings?: string[];
+  /** Derived by the backend for `kind: agent` tips; absent otherwise or when
+   *  `agent.v` is newer than this board understands. Never in the file. */
+  agent_state?: AgentState;
 }
 
 export interface Settings {
@@ -182,6 +212,9 @@ export interface Commands {
   reveal_tip: (args: { id: string }) => void;
   /** Open the tips folder in Explorer. */
   open_folder: () => void;
+  /** Open the folder `<tips folder>/<agent.results>` in Explorer; refused
+   *  unless it is an existing folder under `agent/` (files are never opened). */
+  open_agent_results: (args: { id: string }) => void;
   /** Folder picker; `null` when cancelled. */
   pick_folder: () => string | null;
   /** Set (`#rrggbb`) or clear (`null`) the tile colour override. */

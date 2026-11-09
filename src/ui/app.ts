@@ -588,6 +588,7 @@ export class App {
           if (path) showNotice(t('openedIn'), path);
         }),
       onReveal: (id: string) => void guard('reveal_tip', () => call('reveal_tip', { id })),
+      onOpenResults: (id: string) => void guard('open_agent_results', () => call('open_agent_results', { id })),
       onOpenLink: (url: string) => void guard('open link', () => openExternal(url)),
       onBack: () => this.back_(),
       resolveImage: this.resolveImage,

@@ -27,6 +27,7 @@ pub fn score(tip: &Tip, now: NaiveDateTime) -> i64 {
         Kind::Event => 3,
         Kind::Task => 2,
         Kind::Reading => 1,
+        Kind::Agent => 1,
         Kind::Note => 0,
     };
     urgency_points + priority_points + kind_points
