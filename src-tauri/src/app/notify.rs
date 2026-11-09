@@ -7,6 +7,7 @@ use chrono::NaiveDateTime;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
+use crate::core::agent::AgentState;
 use crate::core::deadline::{urgency, Urgency};
 use crate::core::nextup::visible;
 use crate::core::tip::{Kind, Tip};
@@ -151,6 +152,35 @@ pub fn settle(failures: &mut BTreeMap<String, u32>, keys: Vec<String>, shown: bo
                 failures.remove(key);
             }
             give_up
+        })
+        .collect()
+}
+
+/// Toasts for open agent tips that a scan saw turn `done` or `question`.
+/// Only tips already on the board count: a tip's first appearance is not a
+/// change (and the very first scan is skipped by the caller). Tips written
+/// by this process are never in `fetched`, since their stamp is known.
+pub fn agent_toasts(previous: &[Tip], fetched: &[Tip]) -> Vec<Toast> {
+    fetched
+        .iter()
+        .filter(|t| t.is_open())
+        .filter_map(|tip| {
+            let before = previous.iter().find(|p| p.id == tip.id)?;
+            let state = tip.agent_state?;
+            if before.agent_state == Some(state) {
+                return None;
+            }
+            let title = match state {
+                AgentState::Done => "⭐ Agent finished",
+                AgentState::Question => "❓ Agent has a question",
+                AgentState::Queued | AgentState::Running | AgentState::Failed => return None,
+            };
+            Some(Toast {
+                key: tip.id.clone(),
+                title: title.to_string(),
+                body: tip.display_title().to_string(),
+                stale: false,
+            })
         })
         .collect()
 }
@@ -380,6 +410,44 @@ due: 2026-10-08 10:00
         assert!(due_reminders(&[snoozed], &BTreeSet::new(), now).is_empty());
         let done = t.complete(now);
         assert!(due_reminders(&[done], &BTreeSet::new(), now).is_empty());
+    }
+
+    fn agent_tip(state: Option<&str>, body: &str) -> Tip {
+        let hash = crate::core::agent::body_hash(body);
+        let agent = state
+            .map(|s| format!("agent:\n  v: 1\n  state: {s}\n  hash: {hash}\n"))
+            .unwrap_or_default();
+        let text = format!("---\ntitle: Survey\nkind: agent\n{agent}---\n{body}");
+        Tip::parse("tips/survey.md", None, &text).unwrap()
+    }
+
+    #[test]
+    fn agent_toasts_on_done_and_question_only() {
+        let one = std::slice::from_ref;
+        let queued = agent_tip(None, "Prompt\n");
+        let running = agent_tip(Some("running"), "Prompt\n");
+        let done = agent_tip(Some("done"), "Prompt\n");
+        let question = agent_tip(Some("question"), "Prompt\n");
+        let failed = agent_tip(Some("failed"), "Prompt\n");
+        let toasts = agent_toasts(one(&running), one(&done));
+        assert_eq!(toasts.len(), 1);
+        assert_eq!(toasts[0].title, "⭐ Agent finished");
+        assert_eq!(toasts[0].body, "Survey");
+        let toasts = agent_toasts(one(&queued), one(&question));
+        assert_eq!(toasts[0].title, "❓ Agent has a question");
+        // No change, failed, running and queued are silent.
+        assert!(agent_toasts(one(&done), one(&done)).is_empty());
+        assert!(agent_toasts(one(&running), one(&failed)).is_empty());
+        assert!(agent_toasts(one(&queued), one(&running)).is_empty());
+        assert!(agent_toasts(one(&done), one(&queued)).is_empty());
+        // A tip seen for the first time is not a change.
+        assert!(agent_toasts(&[], one(&done)).is_empty());
+        // Retired (done on the board) tips are silent.
+        let retired = done.complete(dt("2026-11-09 10:00"));
+        assert!(agent_toasts(one(&running), one(&retired)).is_empty());
+        // Plain tips never toast.
+        let plain = tip("---\ntitle: P\n---\n");
+        assert!(agent_toasts(one(&plain), one(&plain)).is_empty());
     }
 
     #[test]

@@ -6,7 +6,7 @@ is optional. Unknown keys are preserved when the app writes the file back.
 ```markdown
 ---
 title: Submit ECCE camera-ready
-kind: deadline            # task | deadline | note | reading | event
+kind: deadline            # task | deadline | note | reading | event | agent
 priority: high            # low | normal | high
 status: open              # open | done
 due: 2026-10-15           # date → 23:59, or "2026-10-15 17:00"
@@ -114,15 +114,16 @@ paper:
 
 A tip created from the capture bar or the "+" tile starts as a template:
 the keys you typed, a commented reference of every optional key, and an
-example body (checklist, figure, links). Edit or delete what you do not
-need. The comments last until the app rewrites the file (Done, snooze, or
+example body (checklist, figure, links); an agent tip gets no example
+body. Edit or delete what you do not need. The comments last until the app rewrites the file (Done, snooze, or
 when the file is modified); by then they have done their job.
 
 A tip created with the full new-tip form gets no commented reference (the
 form already shows every key). Its body is what you typed, or, if you left
 it blank, a short skeleton for its kind: a checklist line for a task,
 "What is due" and a checklist for a deadline, "Why read it / Key claims /
-Notes" for reading, "Agenda / Notes" for an event, and nothing for a note.
+Notes" for reading, "Agenda / Notes" for an event, and nothing for a note
+or an agent tip.
 
 ## Keys the app writes
 
@@ -133,6 +134,7 @@ Notes" for reading, "Agenda / Notes" for an event, and nothing for a note.
 | `snoozed_until` | you press **Snooze**                                      |
 | `paper`         | arXiv / Crossref metadata was fetched                     |
 | `created`       | the tip was made with quick capture or the new-tip form   |
+| `agent`         | never: only the agent runner writes it, see *Agent tips*  |
 | `color`, `size` | you pick a swatch or size in the tile's detail view       |
 | `order`         | you drag a tile to a new place on the board               |
 
@@ -148,8 +150,84 @@ Check coil temperature after run 3 #lab !high @tomorrow 09:30 ^"Lab 302"
 | `!high` `!low` | priority                                             |
 | `@today` `@tomorrow` `@nextweek` `@2026-10-15` | due date, optional `HH:MM` after it |
 | `^location`    | location, quote for spaces                           |
-| `>kind`        | `>task` `>deadline` `>note` `>reading` `>event`      |
+| `>kind`        | `>task` `>deadline` `>note` `>reading` `>event` `>agent` |
 | arXiv id / URL, DOI | becomes a reading tip and fetches metadata      |
+
+## Agent tips
+
+A tip with `kind: agent` is a task for an AI agent. Write the task as the
+title and the body; that is all. A separate runner (Claude Graph) scans the
+tips folder, runs one agent session per task and writes the outcome back
+into the same file. The contract between the two apps is
+[AGENT-PROTOCOL.md](AGENT-PROTOCOL.md); this section is the board's side.
+
+```markdown
+---
+title: Survey hairpin AC loss papers
+kind: agent
+agent:                      # written by the runner only, never by the board
+  v: 1
+  state: done               # running | done | question | failed
+  hash: sha256:d7e5fb1c...  # hash of the body when the runner wrote
+  host: DESKTOP-ABC
+  run: 20261109-193100-ab12
+  at: 2026-11-09T19:31:00
+  results: agent/agent-survey-example/   # relative to the tips folder
+---
+
+Survey recent papers on AC copper loss in hairpin windings.
+
+<!-- agent:begin 2026-11-09T07:31:00 question -->
+## ❓ Questions · 2026-11-09 07:31
+1. Which year range should the survey cover?
+<!-- agent:end -->
+
+2020 onwards.
+```
+
+- **The `agent` map is read-only for the board.** Every board action (the
+  Edit form, Done, reopen, snooze, colour, size, drag, fetching paper
+  metadata) keeps it, including sub-keys the board does not know. The Edit
+  form has no field for it. Changing the kind away from `agent` keeps the
+  map too (the tip just stops showing a badge); change it back and the
+  badge returns. A malformed value (not a map, wrong types) does not
+  make the tip unreadable; it is kept as written and the tip shows as waiting.
+- **The badge** on the tile is derived, never stored:
+
+  | Badge | State | When |
+  | ----- | ----- | ---- |
+  | 🕓 | waiting | never handled, or you changed the body since the runner wrote |
+  | ⚙ | running | the runner claimed it |
+  | ⭐ | finished | the runner left a result and the body is unchanged since |
+  | ❓ | question | the agent asked something; answer by typing in the body |
+  | ⚠ | failed | the run failed; edit the body to try again |
+
+  A tip with a question is shown at least `md` size unless you set a size.
+  `agent.v` above 1 (a newer protocol) shows as a plain agent tip with no badge.
+- **Answer or ask for more** by typing anywhere in the body, normally below
+  the last block. The body hash changes, the tile turns 🕓 and the runner
+  picks it up on its next scan. Changing the title, colour, size or order
+  does not re-run it.
+- **Blocks** between `<!-- agent:begin ... -->` and `<!-- agent:end -->`
+  are the runner's rounds. The comment lines are not shown in the detail view.
+- **Results**: the detail view shows the state, host and time, and an
+  **Open results** button when `agent.results` is set. The path must be
+  an existing folder under `agent/` in the tips folder (relative, no `..`);
+  anything else, including a file, is refused.
+  The results subfolder is not a tip: the board only lists `*.md` directly in
+  the tips folder.
+- **Toasts**: when a scan sees an agent tip turn ⭐ or ❓ (written by the
+  runner, possibly on another PC), the board raises a toast, gated by the
+  same "Toast when a new tip arrives" setting. Not on the first scan after
+  start.
+- **Retire** a task by marking it Done; the runner skips done tips.
+- **Stuck at ⚙** because the machine that claimed it is gone: open the file
+  in a text editor and delete the `agent:` lines; the tip is then a new task.
+- **Do not share the tips folder for writing** with anyone else: whoever can
+  write a `kind: agent` tip there gets an agent session on the runner's machine.
+- A new agent tip, from the capture bar (`>agent`) or the new-tip form, has
+  no `agent` map and no example body or skeleton: the body is the agent's
+  prompt, so it holds only what you typed.
 
 ## Time semantics
 

@@ -56,6 +56,7 @@ Metro colours were too loud next to real work.
 | event        | `#2C5F58` | deep teal |
 | note         | `#3A4356` | slate |
 | reading      | `#8C4A22` | burnt orange |
+| agent        | `#34557A` | steel blue |
 | deadline, later    | `#3F6B3A` | EVA-01 green |
 | deadline, soon     | `#A87B1F` | amber |
 | deadline, critical | `#9E2F2A` | EVA-02 red |

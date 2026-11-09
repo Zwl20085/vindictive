@@ -203,7 +203,7 @@ tags: [ecce, paper]
 | Key | Values | Notes |
 | --- | ------ | ----- |
 | `title` | text | required |
-| `kind` | `task` `deadline` `note` `reading` `event` | default `task` |
+| `kind` | `task` `deadline` `note` `reading` `event` `agent` | default `task` |
 | `priority` | `low` `normal` `high` | tile size and score |
 | `status` | `open` `done` | written by the app |
 | `due` | `2026-10-15` or `2026-10-15 17:00` | bare date means 23:59 |
@@ -219,6 +219,17 @@ tags: [ecce, paper]
 
 Full reference: [docs/TIP-FORMAT.md](docs/TIP-FORMAT.md).
 
+### Agent tips
+
+A tip with `kind: agent` is a task for an AI agent: write what you want in
+the title and body, and a separate runner ([Claude Graph](https://github.com/Zwl20085/claude-graph))
+runs it and writes the outcome back into the file. The tile shows 🕓 waiting,
+⚙ running, ⭐ finished, ❓ a question for you, or ⚠ failed; answer a question
+by typing in the body. The board only reads the `agent` frontmatter map and
+keeps it through every edit. The contract between the two apps is
+[docs/AGENT-PROTOCOL.md](docs/AGENT-PROTOCOL.md); the board's side is in
+[docs/TIP-FORMAT.md](docs/TIP-FORMAT.md#agent-tips).
+
 ### Quick-capture syntax
 
 | Token | Meaning |
@@ -227,7 +238,7 @@ Full reference: [docs/TIP-FORMAT.md](docs/TIP-FORMAT.md).
 | `!high` `!low` | priority |
 | `@today` `@tomorrow` `@nextweek` `@2026-10-15` | due date, 23:59 unless `HH:MM` follows |
 | `^location` | location, quote for spaces: `^"Lab 302"` |
-| `>task` `>deadline` `>note` `>reading` `>event` | kind |
+| `>task` `>deadline` `>note` `>reading` `>event` `>agent` | kind |
 | arXiv id, arXiv URL, DOI | becomes a reading tip and fetches metadata |
 
 ### Recurrence grammar

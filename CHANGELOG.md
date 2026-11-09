@@ -9,6 +9,22 @@ conventional-commit history; the version a commit shipped in is the first
 
 ## [Unreleased]
 
+### Added
+
+- Agent tips (protocol v1, `docs/AGENT-PROTOCOL.md`): `kind: agent` is a
+  task for an AI agent that Claude Graph runs and writes back. The tile and
+  the detail view show 🕓 waiting, ⚙ running, ⭐ finished, ❓ a question or
+  ⚠ failed, derived from `agent.state` and a hash of the body; typing in
+  the body re-queues it. "Open results" opens the run's folder under
+  `agent/` in the tips folder (folders only, never files). A toast when a
+  synced agent tip turns ⭐ or ❓. `>agent` in quick capture and the add bar,
+  and `agent` in the kind list of the new-tip and Edit forms (no skeleton
+  body: the body is the agent's prompt).
+- The board never writes the `agent` map and keeps it, unknown sub-keys and
+  malformed values included, through every write: the Edit form (which has
+  no field for it, and keeps it when the kind changes), Done, reopen,
+  snooze, colour, size, drag and paper metadata.
+
 ## [0.5.3] - 2026-11-04
 
 0.5.2 was tagged but never published: its release verify job caught a test

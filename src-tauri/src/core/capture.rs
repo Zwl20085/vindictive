@@ -7,7 +7,7 @@
 //! - `!high` / `!low`  sets priority
 //! - `@today`, `@tomorrow`, `@2026-10-15`, optionally followed by `HH:MM`
 //! - `^location`       sets location; quote it for spaces
-//! - `>kind`           one of task, deadline, note, reading, event
+//! - `>kind`           one of task, deadline, note, reading, event, agent
 //! - a bare arXiv id / URL or DOI sets `arxiv` / `doi` and kind reading
 
 use std::sync::LazyLock;
@@ -111,6 +111,7 @@ fn parse_kind(k: &str) -> Option<Kind> {
         "note" => Some(Kind::Note),
         "reading" | "read" | "paper" => Some(Kind::Reading),
         "event" | "meeting" => Some(Kind::Event),
+        "agent" => Some(Kind::Agent),
         _ => None,
     }
 }
@@ -202,6 +203,14 @@ mod tests {
         let f = parse("Plain note >note", now).unwrap();
         assert_eq!(f.kind, Kind::Note);
         assert!(f.due.is_none());
+        let f = parse(">agent Survey hairpin AC loss papers #lit @tomorrow", now).unwrap();
+        assert_eq!(
+            f.kind,
+            Kind::Agent,
+            "a date does not turn an agent task into a deadline"
+        );
+        assert_eq!(f.title, "Survey hairpin AC loss papers");
+        assert!(f.agent.is_none(), "capture never writes the agent map");
     }
 
     #[test]

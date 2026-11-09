@@ -408,3 +408,51 @@ describe('create mode', () => {
     expect(form.querySelector('.set-more-summary')?.textContent).toBe('更多');
   });
 });
+
+describe('agent tips in the form', () => {
+  const agentTip: Tip = {
+    ...base,
+    id: 'survey',
+    path: 'tips/survey.md',
+    title: 'Survey hairpin AC loss papers',
+    kind: 'agent',
+    due: undefined,
+    due_at: undefined,
+    body: 'Prompt\n',
+    agent: { v: 1, state: 'done', hash: 'sha256:x', zz: 'keep' },
+    agent_state: 'done',
+  };
+  const kindOptions = (form: HTMLFormElement): [string, string][] =>
+    Array.from(form.querySelector<HTMLSelectElement>('[name="kind"]')?.options ?? []).map((o) => [o.value, o.textContent ?? '']);
+
+  it('the kind selector offers agent, labelled in English and Chinese, in both modes', () => {
+    for (const mode of ['edit', 'create'] as const) {
+      setLocale('en');
+      expect(kindOptions(setup(agentTip, undefined, mode).form)).toContainEqual(['agent', 'Agent']);
+      setLocale('zh');
+      expect(kindOptions(setup(agentTip, undefined, mode).form)).toContainEqual(['agent', '智能体']);
+    }
+  });
+
+  it('the Edit form has no agent field and never sends one', () => {
+    const { form, field } = setup(agentTip);
+    expect(field<HTMLSelectElement>('kind').value).toBe('agent');
+    const names = Array.from(form.elements, (e) => (e as HTMLInputElement).name).filter(Boolean);
+    expect(names.some((n) => /agent/i.test(n))).toBe(false);
+    const edit = readEditForm(form);
+    expect(edit.kind).toBe('agent');
+    expect(edit.body).toBe('Prompt\n');
+    expect(Object.keys(edit)).not.toContain('agent');
+    expect(Object.keys(edit)).not.toContain('agent_state');
+    // Switching the kind away does not send anything about the map either.
+    field<HTMLSelectElement>('kind').value = 'task';
+    expect(Object.keys(readEditForm(form))).not.toContain('agent');
+  });
+
+  it('the new-tip form makes an agent tip from the kind and the typed text only', () => {
+    const { form, field } = setup(tipFromDraft({ ...emptyDraft(), title: 'Survey papers' }), undefined, 'create');
+    field<HTMLSelectElement>('kind').value = 'agent';
+    field<HTMLTextAreaElement>('body').value = 'Find three recent papers.';
+    expect(readEditForm(form)).toEqual({ ...emptyDraft(), title: 'Survey papers', kind: 'agent', body: 'Find three recent papers.' });
+  });
+});

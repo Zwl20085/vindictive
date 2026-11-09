@@ -12,11 +12,12 @@ use tauri_plugin_dialog::DialogExt;
 use super::settings::{Dock, Language, Settings};
 use super::state::{now, AppState, BoardState};
 use super::{editor, hotkeys, windows};
+use crate::core::agent;
 use crate::core::capture;
 use crate::core::edit::{self, TipEdit};
 use crate::core::template;
 use crate::core::timeparse::format_dt;
-use crate::core::tip::{slugify, FrontMatter, Kind, Tip};
+use crate::core::tip::{slugify, FrontMatter, Tip};
 use crate::sync::folder::{FolderError, FolderStore};
 use crate::sync::meta;
 use crate::sync::weather::{self, Weather};
@@ -221,6 +222,30 @@ pub fn reveal_tip(state: State<'_, AppState>, id: String) -> Result<(), String> 
         .map_err(|e| e.to_string())?;
     tauri_plugin_opener::reveal_item_in_dir(&path)
         .map_err(|e| format!("cannot show {}: {e}", path.display()))
+}
+
+/// Open the agent's results folder (`agent.results`) in Explorer, like
+/// `open_folder`. Only an existing folder under `<tips folder>/agent/` is
+/// opened, by its canonical path; a file is never opened from here, since the
+/// shell would run an `.exe`, `.lnk` or `.bat` anyone with write access to
+/// the synced folder could plant.
+#[tauri::command]
+pub fn open_agent_results(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let tip = find(&state, &id)?;
+    let folder = agent_results_path(&state.store()?, &tip)?;
+    tauri_plugin_opener::open_path(&folder, None::<&str>)
+        .map_err(|e| format!("cannot open {}: {e}", folder.display()))
+}
+
+fn agent_results_path(store: &FolderStore, tip: &Tip) -> Result<PathBuf, String> {
+    let results = tip
+        .front
+        .agent
+        .as_ref()
+        .and_then(|a| a.text("results"))
+        .ok_or("the agent has not recorded a results folder for this tip")?;
+    let rel = agent::results_rel(results)?;
+    store.resolve_existing_dir(&rel).map_err(|e| e.to_string())
 }
 
 /// Open the tips folder in Explorer.
@@ -569,12 +594,7 @@ pub async fn enrich(app: &AppHandle, id: &str) -> Result<(), String> {
     };
     // Re-read: the tip may have been completed or snoozed while we waited.
     let current = find(&state, id)?;
-    let mut front = current.front.clone();
-    front.paper = Some(paper);
-    if front.kind == Kind::Task {
-        front.kind = Kind::Reading;
-    }
-    let enriched = current.with_front(front);
+    let enriched = current.enriched(paper);
     state
         .save_tip(app, enriched, "paper metadata")
         .await
@@ -636,6 +656,7 @@ fn mime_for(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::tip::Kind;
 
     #[test]
     fn image_paths_are_folder_relative() {
@@ -785,6 +806,66 @@ mod tests {
         assert!(text.contains("## Why read it"), "{text}");
     }
 
+    /// `create_tip_full` with kind agent: a new task, so no `agent` map even
+    /// if a request carries one, and exactly the user's text as the body.
+    #[test]
+    fn form_agent_tips_are_new_tasks_with_the_users_text() {
+        use crate::core::agent::AgentState;
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 11, 9)
+            .unwrap()
+            .and_hms_opt(8, 0, 0)
+            .unwrap();
+        // The frontend never sends `agent`; a request that does is ignored.
+        let form: TipEdit = serde_json::from_value(serde_json::json!({
+            "title": "Survey hairpin AC loss papers",
+            "kind": "agent",
+            "priority": "normal",
+            "body": "Find three recent papers.\r\n",
+            "agent": { "v": 1, "state": "done", "hash": "sha256:x" },
+        }))
+        .unwrap();
+        let (front, body) = form_tip(form.clone(), at, false).unwrap();
+        assert_eq!(front.kind, Kind::Agent);
+        assert!(front.agent.is_none());
+        assert!(front.extra.is_empty(), "{:?}", front.extra);
+        assert_eq!(body, "Find three recent papers.\n");
+        let (tip, text) =
+            template::render_with_body("survey.md", front, &body, false, false).unwrap();
+        assert!(!text.contains("agent:"), "{text}");
+        assert_eq!(tip.body.trim(), "Find three recent papers.");
+        assert_eq!(tip.agent_state, Some(AgentState::Queued));
+        // Left blank, the body stays blank: no skeleton in the agent's prompt.
+        for zh in [false, true] {
+            let (_, blank) = form_tip(
+                TipEdit {
+                    body: " \n".into(),
+                    ..form.clone()
+                },
+                at,
+                zh,
+            )
+            .unwrap();
+            assert_eq!(blank, "");
+        }
+    }
+
+    /// `create_tip` (quick capture) with `>agent`: no example body, no map.
+    #[test]
+    fn captured_agent_tips_are_new_tasks() {
+        use crate::core::agent::AgentState;
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 11, 9)
+            .unwrap()
+            .and_hms_opt(8, 0, 0)
+            .unwrap();
+        let front = capture::parse("Survey hairpin AC loss papers >agent", at).unwrap();
+        assert_eq!(front.kind, Kind::Agent);
+        let (tip, text) = template::render("survey.md", front, false, true).unwrap();
+        assert!(!text.contains("\nagent:"), "{text}");
+        assert!(!text.contains("## Checklist"), "{text}");
+        assert_eq!(tip.body.trim(), "");
+        assert_eq!(tip.agent_state, Some(AgentState::Queued));
+    }
+
     #[test]
     fn edits_must_start_from_the_current_file() {
         let tip = Tip::parse(
@@ -830,6 +911,62 @@ title: A
             capture_name(&state, &store, "note", Some("note-2.md")),
             "note-3.md"
         );
+    }
+
+    #[test]
+    fn agent_results_are_validated_before_opening() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FolderStore::open(dir.path()).unwrap();
+        let survey = dir.path().join("agent").join("survey");
+        std::fs::create_dir_all(&survey).unwrap();
+        std::fs::write(survey.join("result.md"), "x").unwrap();
+        std::fs::write(survey.join("setup.exe"), "MZ").unwrap();
+        std::fs::create_dir_all(dir.path().join("figures")).unwrap();
+        let tip = |results: &str| {
+            let text = format!(
+                "---
+title: S
+kind: agent
+agent:
+  results: {results}
+---
+"
+            );
+            Tip::parse("survey.md", None, &text).unwrap()
+        };
+        let opened = agent_results_path(&store, &tip("agent/survey/")).unwrap();
+        // The canonical folder (8.3 names expanded), without the `\\?\` prefix.
+        assert_eq!(
+            std::fs::canonicalize(&opened).unwrap(),
+            std::fs::canonicalize(&survey).unwrap()
+        );
+        assert!(opened.is_absolute() && opened.is_dir());
+        assert!(!opened.to_string_lossy().starts_with(r"\\?\"));
+        let refused = |results: &str| agent_results_path(&store, &tip(results)).unwrap_err();
+        // Files are refused, whatever their type.
+        for file in ["agent/survey/result.md", "agent/survey/setup.exe"] {
+            assert!(refused(file).contains("only folders"), "{file}");
+        }
+        // Existing folders outside `agent/` are refused.
+        assert!(refused("figures/").contains("under agent/"));
+        // A missing folder gets a friendly message.
+        assert!(refused("agent/missing/").contains("does not exist (yet)"));
+        for bad in ["../outside/", "/etc/", r"'C:\Windows'", "agent/../../x"] {
+            assert!(agent_results_path(&store, &tip(bad)).is_err(), "{bad}");
+        }
+        let none = Tip::parse(
+            "n.md",
+            None,
+            "---
+title: N
+kind: agent
+---
+",
+        )
+        .unwrap();
+        assert!(agent_results_path(&store, &none)
+            .unwrap_err()
+            .contains("results"));
     }
 
     #[test]

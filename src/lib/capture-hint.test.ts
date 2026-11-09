@@ -57,6 +57,8 @@ describe('parseCapture', () => {
     expect(parseCapture('Group >meeting !l', now)).toEqual({ title: 'Group', kind: 'event', priority: 'low' });
     expect(parseCapture('x >paper', now).kind).toBe('reading');
     expect(parseCapture('x >due', now).kind).toBe('deadline');
+    // The add bar prefills the new-tip form from this: an agent tip, no `agent` map.
+    expect(parseCapture('Survey AC loss >agent', now)).toEqual({ title: 'Survey AC loss', kind: 'agent' });
     expect(parseCapture('Submit ＠2026-11-02 ！low ＃论文', now)).toEqual({ title: 'Submit', due: '2026-11-02', priority: 'low', tags: ['论文'] });
   });
   it('leaves arXiv ids and DOIs in the title', () => {

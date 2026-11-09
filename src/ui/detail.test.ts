@@ -21,6 +21,7 @@ function actions(): DetailActions {
     onSetSize: vi.fn(),
     onOpenLink: vi.fn(),
     onReveal: vi.fn(),
+    onOpenResults: vi.fn(),
     onBack: vi.fn(),
     resolveImage: vi.fn(async (src: string) => `data:${src}`),
   };
@@ -158,5 +159,41 @@ describe('highlights in the detail', () => {
     const panel = renderWith(tip({ body: 'See <https://example.org/p> and https://example.org/q' }), []);
     expect(panel.querySelectorAll('.detail-body a[href]').length).toBeGreaterThan(0);
     expect(panel.querySelector('.detail-body a mark.hl-url')).toBeNull();
+  });
+});
+
+describe('agent detail', () => {
+  const agentTip = tip({
+    id: 'survey',
+    path: 'survey.md',
+    title: 'Survey hairpin AC loss papers',
+    kind: 'agent',
+    body: 'Prompt\n',
+    agent: { v: 1, state: 'done', hash: 'sha256:x', host: 'DESKTOP-ABC', at: '2026-11-09T19:31:00', results: 'agent/survey/' },
+    agent_state: 'done',
+  });
+
+  it('shows the state in words, the host and the time', () => {
+    const block = render(agentTip).panel.querySelector('.detail-agent');
+    expect(block?.classList.contains('detail-agent-done')).toBe(true);
+    const text = block?.textContent ?? '';
+    expect(text).toContain('⭐ Agent finished');
+    expect(text).toContain('DESKTOP-ABC');
+    expect(text).toContain('19:31');
+  });
+
+  it('offers Open results only when results are recorded', () => {
+    const { panel, a } = render(agentTip);
+    const button = panel.querySelector<HTMLButtonElement>('.detail-agent-results');
+    expect(button?.textContent).toBe('Open results');
+    button?.click();
+    expect(a.onOpenResults).toHaveBeenCalledWith('survey');
+    const queued = render({ ...agentTip, agent: undefined, agent_state: 'queued' }).panel;
+    expect(queued.querySelector('.detail-agent-results')).toBeNull();
+    expect(queued.querySelector('.detail-agent')?.textContent).toContain('Waiting for the agent');
+  });
+
+  it('non-agent tips have no agent block', () => {
+    expect(render({ ...agentTip, kind: 'task', agent_state: undefined }).panel.querySelector('.detail-agent')).toBeNull();
   });
 });

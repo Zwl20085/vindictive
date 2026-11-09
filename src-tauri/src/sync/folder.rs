@@ -46,6 +46,10 @@ pub enum FolderError {
     InUse(String),
     #[error("refusing path {0:?}: it must stay inside the tips folder")]
     BadPath(String),
+    #[error("the folder {0} does not exist (yet); OneDrive may still be syncing it")]
+    NoFolder(String),
+    #[error("refusing {0}: it is a file, and only folders are opened")]
+    NotAFolder(String),
     #[error("{what} {path}: {source}")]
     Io {
         what: &'static str,
@@ -208,6 +212,25 @@ impl FolderStore {
         }
     }
 
+    /// Canonical path of the existing *folder* `rel`, checked to be inside
+    /// the canonical tips folder once links and junctions are followed.
+    /// Files are refused: the result is handed to the shell opener, which
+    /// would run an `.exe`, `.lnk` or `.bat`. Used for agent results only.
+    pub fn resolve_existing_dir(&self, rel: &str) -> Result<PathBuf> {
+        let path = self.resolve(rel)?;
+        let real = std::fs::canonicalize(&path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => FolderError::NoFolder(rel.to_string()),
+            _ => io("cannot inspect", &path, e),
+        })?;
+        if !real.starts_with(&self.canonical_root) {
+            return Err(FolderError::BadPath(rel.to_string()));
+        }
+        if !real.is_dir() {
+            return Err(FolderError::NotAFolder(rel.to_string()));
+        }
+        Ok(plain_path(&real))
+    }
+
     fn check_unchanged(&self, rel: &str, path: &Path, expected: Option<&str>) -> Result<()> {
         let current = match std::fs::metadata(path) {
             Ok(meta) => Some(stamp_of(&meta)),
@@ -245,6 +268,19 @@ pub fn onedrive_root() -> Option<String> {
         .iter()
         .filter_map(|key| std::env::var(key).ok())
         .find(|p| !p.trim().is_empty())
+}
+
+/// A canonical path without the Windows verbatim prefix (`\\?\C:\...` to
+/// `C:\...`, `\\?\UNC\srv\share` to `\\srv\share`), which Explorer does not
+/// accept. Anything else is returned as it is.
+fn plain_path(path: &Path) -> PathBuf {
+    match path.to_str() {
+        Some(s) if s.starts_with(r"\\?\UNC\") => PathBuf::from(format!(r"\\{}", &s[8..])),
+        Some(s) if s.starts_with(r"\\?\") && s.as_bytes().get(5) == Some(&b':') => {
+            PathBuf::from(&s[4..])
+        }
+        _ => path.to_path_buf(),
+    }
 }
 
 /// Move `tmp` over `path`, retrying while another program holds a handle.
@@ -540,6 +576,58 @@ mod tests {
             assert!(s.resolve(bad).is_err(), "{bad}");
         }
         assert!(s.resolve("figures/plot.png").is_ok());
+    }
+
+    #[test]
+    fn existing_dirs_must_be_folders_inside_the_tips_folder() {
+        let (s, dir) = store();
+        let survey = dir.path().join("agent").join("survey");
+        std::fs::create_dir_all(&survey).unwrap();
+        std::fs::write(survey.join("result.md"), "x").unwrap();
+        std::fs::write(survey.join("setup.exe"), "MZ").unwrap();
+        // The canonical path, in a form Explorer accepts.
+        let got = s.resolve_existing_dir("agent/survey").unwrap();
+        assert_eq!(got, plain_path(&std::fs::canonicalize(&survey).unwrap()));
+        assert!(got.is_absolute() && !got.to_string_lossy().starts_with(r"\\?\"));
+        // Files are never handed to the opener.
+        for file in ["agent/survey/result.md", "agent/survey/setup.exe"] {
+            assert!(
+                matches!(
+                    s.resolve_existing_dir(file),
+                    Err(FolderError::NotAFolder(_))
+                ),
+                "{file}"
+            );
+        }
+        let missing = s.resolve_existing_dir("agent/missing").unwrap_err();
+        assert!(matches!(missing, FolderError::NoFolder(_)));
+        assert!(missing.to_string().contains("does not exist"), "{missing}");
+        for bad in ["../x", "/etc", "agent/../../x", r"C:\Windows"] {
+            assert!(
+                matches!(s.resolve_existing_dir(bad), Err(FolderError::BadPath(_))),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_paths_drop_the_verbatim_prefix() {
+        assert_eq!(
+            plain_path(Path::new(r"\\?\C:\Users\me\Tips\agent\x")),
+            PathBuf::from(r"C:\Users\me\Tips\agent\x")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\nas\share\agent")),
+            PathBuf::from(r"\\nas\share\agent")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\Volume{abc}\x")),
+            PathBuf::from(r"\\?\Volume{abc}\x")
+        );
+        assert_eq!(
+            plain_path(Path::new("/tmp/tips")),
+            PathBuf::from("/tmp/tips")
+        );
     }
 
     #[test]

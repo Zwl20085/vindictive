@@ -22,6 +22,7 @@ The files cover every kind of tip the app understands:
 | `read-doi-tie.md` | reading tip with a DOI only, metadata fetched later |
 | `rebuttal-notes.md` | plain note with a task list body |
 | `backup-nas.md` | a done task with `done_at` |
+| `agent-survey-example.md` | agent tip with a question block, an answer and a result block; shows ⭐ |
 
 Dates in the examples are in autumn 2026; edit them so the deadlines are in
 your future, otherwise everything shows as overdue.

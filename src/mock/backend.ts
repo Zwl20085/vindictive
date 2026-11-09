@@ -3,6 +3,7 @@
  * outside Tauri. Every mutation produces new arrays; nothing is mutated.
  */
 import type { BoardState, Commands, Events, Settings, Tip, TipEdit, Weather } from '../types';
+import { withAgentState } from '../lib/agent';
 import { parseCapture } from '../lib/capture-hint';
 import { MINUTE_MS, parseNaive, toNaive } from '../lib/time';
 import { urgencyOf } from '../lib/urgency';
@@ -13,7 +14,7 @@ type Listener = (payload: unknown) => void;
 
 const URGENCY_POINTS = { overdue: 1000, critical: 500, soon: 200, later: 50, none: 10 } as const;
 const PRIORITY_POINTS = { high: 30, normal: 10, low: 0 } as const;
-const KIND_POINTS = { deadline: 5, event: 3, task: 2, reading: 1, note: 0 } as const;
+const KIND_POINTS = { deadline: 5, event: 3, task: 2, reading: 1, agent: 1, note: 0 } as const;
 
 /** A small SVG "plot" so figure rendering can be exercised without a repo. */
 const PLACEHOLDER_SVG =
@@ -152,13 +153,15 @@ export function parseCaptureText(text: string, now = new Date()): Omit<Tip, 'id'
   };
 }
 
-/** Simple stand-ins for the kind templates in `core/template.rs`. */
+/** Simple stand-ins for the kind templates in `core/template.rs`. An agent
+ *  tip's body is the agent's prompt, so it gets none. */
 const TEMPLATE_BODIES: Readonly<Record<Tip['kind'], string>> = {
   task: '## Checklist\n\n- [ ] First step\n- [ ] Second step\n',
   deadline: '## Before the deadline\n\n- [ ] Draft\n- [ ] Review\n- [ ] Submit\n',
   note: '## Notes\n\n',
   reading: '## Summary\n\n## Takeaways\n\n- \n',
   event: '## Agenda\n\n- \n\n## Bring\n\n- \n',
+  agent: '',
 };
 
 const COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -283,12 +286,14 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
     const until = toNaive(new Date(Date.now() + minutes * MINUTE_MS));
     return update({ tips: replaceTip(id, (t) => ({ ...t, snoozed_until: until, snoozed_until_at: until })) });
   },
-  create_tip: ({ text }) => update({ tips: [createTip(text, store.tips), ...store.tips] }),
-  create_tip_full: ({ edit }) => update({ tips: [createTipFull(edit, store.tips), ...store.tips] }),
+  // New tips and edits derive `agent_state` like the backend; the other
+  // writes change neither the kind nor the body, so it carries over.
+  create_tip: ({ text }) => update({ tips: [withAgentState(createTip(text, store.tips)), ...store.tips] }),
+  create_tip_full: ({ edit }) => update({ tips: [withAgentState(createTipFull(edit, store.tips)), ...store.tips] }),
   fit_window: () => undefined,
   set_color: ({ id, color }) => update({ tips: replaceTip(id, (t) => ({ ...t, color: color ?? undefined })) }),
   set_order: ({ id, order }) => update({ tips: replaceTip(id, (t) => ({ ...t, order: order ?? undefined })) }),
-  update_tip: ({ id, base, edit }) => update({ tips: replaceTip(id, (t) => applyEdit(t, base, edit)) }),
+  update_tip: ({ id, base, edit }) => update({ tips: replaceTip(id, (t) => withAgentState(applyEdit(t, base, edit))) }),
   set_size: ({ id, size }) => update({ tips: replaceTip(id, (t) => ({ ...t, size: size ?? undefined })) }),
   edit_local: ({ id }) => {
     const tip = store.tips.find((t) => t.id === id);
@@ -299,6 +304,9 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
     if (!store.tips.some((t) => t.id === id)) throw new Error(`no tip with id ${id}`);
   },
   open_folder: () => undefined,
+  open_agent_results: ({ id }) => {
+    if (!store.tips.find((t) => t.id === id)?.agent) throw new Error(`tip ${id} has no agent results`);
+  },
   pick_folder: () => 'D:\\OneDrive\\Tips',
   delete_tip: ({ id }) => {
     if (!store.tips.some((t) => t.id === id)) throw new Error(`no tip with id ${id}`);

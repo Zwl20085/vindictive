@@ -6,7 +6,7 @@ export const CAPTURE_HINT = '#tag  !high/!low  @today @tomorrow @2026-10-15 09:0
 export const CAPTURE_PLACEHOLDER = 'What next?';
 
 const DATE_WORDS = new Set(['today', 'tomorrow', 'nextweek', 'tod', 'tom', 'tmr']);
-const KINDS = new Set(['task', 'deadline', 'due', 'note', 'reading', 'read', 'paper', 'event', 'meeting']);
+const KINDS = new Set(['task', 'deadline', 'due', 'note', 'reading', 'read', 'paper', 'event', 'meeting', 'agent']);
 const ARXIV_RE = /(?:arxiv\.org\/(?:abs|pdf)\/|arxiv:)?(\d{4}\.\d{4,5})(v\d+)?/i;
 const DOI_RE = /10\.\d{4,9}\/\S+/i;
 const TIME_RE = /^\d{1,2}:\d{2}$/;
@@ -94,6 +94,7 @@ const KIND_WORDS: Readonly<Record<string, Kind>> = {
   paper: 'reading',
   event: 'event',
   meeting: 'event',
+  agent: 'agent',
 };
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');

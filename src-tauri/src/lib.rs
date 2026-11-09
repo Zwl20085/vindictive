@@ -104,6 +104,7 @@ pub fn run() {
             commands::edit_local,
             commands::reveal_tip,
             commands::open_folder,
+            commands::open_agent_results,
             commands::pick_folder,
             commands::set_color,
             commands::set_size,

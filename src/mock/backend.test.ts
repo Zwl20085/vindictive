@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { toNaive } from '../lib/time';
-import type { TipEdit } from '../types';
+import type { Tip, TipEdit } from '../types';
+import { withAgentState } from '../lib/agent';
 import { mockInvoke, nextOccurrence, parseCaptureText } from './backend';
 
 const now = new Date(2026, 9, 14, 12, 0, 0); // Wed 14 Oct 2026
@@ -150,3 +151,89 @@ describe('mock sample data', () => {
     expect(state.tips.filter((t) => (t.highlight?.length ?? 0) > 0).length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('mock agent tips', () => {
+  const ID = 'agent-survey-hairpin';
+  const agentTip = async (): Promise<Tip> => {
+    const tip = (await mockInvoke('get_state')).tips.find((t) => t.id === ID);
+    if (!tip) throw new Error('no sample agent tip');
+    return tip;
+  };
+  /** The full Edit form for `tip`, every field as the file has it. */
+  const formOf = (tip: Tip): TipEdit => ({
+    title: tip.title,
+    kind: tip.kind,
+    priority: tip.priority,
+    due: tip.due ?? null,
+    location: tip.location ?? null,
+    tags: tip.tags ?? [],
+    remind: tip.remind ?? [],
+    repeat: tip.repeat ?? null,
+    links: tip.links ?? [],
+    images: tip.images ?? [],
+    color: tip.color ?? null,
+    size: tip.size ?? null,
+    highlight: tip.highlight ?? [],
+    body: tip.body,
+  });
+
+  it('the sample is finished: its stored hash is the hash of its body', async () => {
+    const tip = await agentTip();
+    expect(tip.agent_state).toBe('done');
+    expect(withAgentState(tip).agent_state).toBe('done');
+  });
+
+  it('every board write keeps the agent map; only a body edit re-queues', async () => {
+    const original = await agentTip();
+    const map = original.agent;
+    const check = async (what: string, want: Tip['agent_state']) => {
+      const tip = await agentTip();
+      expect(tip.agent, what).toEqual(map);
+      expect(tip.agent_state, what).toBe(want);
+    };
+    await mockInvoke('set_color', { id: ID, color: '#4A3B6B' });
+    await check('set_color', 'done');
+    await mockInvoke('set_size', { id: ID, size: 'wide' });
+    await check('set_size', 'done');
+    await mockInvoke('set_order', { id: ID, order: 1.5 });
+    await check('set_order', 'done');
+    await mockInvoke('snooze', { id: ID, minutes: 60 });
+    await check('snooze', 'done');
+    await mockInvoke('enrich_tip', { id: ID });
+    await check('enrich_tip', 'done');
+    let tip = await agentTip();
+    await mockInvoke('update_tip', { id: ID, base: tip.sha ?? null, edit: formOf(tip) });
+    await check('update_tip unchanged', 'done');
+    tip = await agentTip();
+    const changed = { ...formOf(tip), title: 'Renamed', priority: 'high' as const, tags: ['lit'], due: '2026-11-21 17:00', remind: ['-1d'], color: '#123456', size: 'sm', highlight: ['hairpin'] };
+    await mockInvoke('update_tip', { id: ID, base: tip.sha ?? null, edit: changed });
+    await check('update_tip all fields', 'done');
+    tip = await agentTip();
+    await mockInvoke('update_tip', { id: ID, base: tip.sha ?? null, edit: { ...formOf(tip), body: `${tip.body}\nAlso 2019, please.\n` } });
+    await check('update_tip body', 'queued');
+    tip = await agentTip();
+    await mockInvoke('update_tip', { id: ID, base: tip.sha ?? null, edit: { ...formOf(tip), kind: 'task' } });
+    await check('update_tip kind task', undefined);
+    await mockInvoke('mark_done', { id: ID });
+    await check('mark_done', undefined);
+    await mockInvoke('reopen', { id: ID });
+    await check('reopen', undefined);
+  });
+
+  it('new agent tips from the form or quick capture are new tasks', async () => {
+    const full = await mockInvoke('create_tip_full', { edit: { ...emptyForm(), title: 'Agent task', kind: 'agent', body: 'Find three papers.' } });
+    const made = full.tips.find((t) => t.title === 'Agent task');
+    expect(made).toMatchObject({ kind: 'agent', body: 'Find three papers.', agent_state: 'queued' });
+    expect(made?.agent).toBeUndefined();
+    const blank = await mockInvoke('create_tip_full', { edit: { ...emptyForm(), title: 'Blank agent task', kind: 'agent' } });
+    expect(blank.tips.find((t) => t.title === 'Blank agent task')?.body).toBe('');
+    const captured = await mockInvoke('create_tip', { text: 'Captured agent task >agent' });
+    const cap = captured.tips.find((t) => t.title === 'Captured agent task');
+    expect(cap).toMatchObject({ kind: 'agent', agent_state: 'queued' });
+    expect(cap?.agent).toBeUndefined();
+  });
+});
+
+function emptyForm(): TipEdit {
+  return { title: '', kind: 'task', priority: 'normal', due: null, location: null, tags: [], remind: [], repeat: null, links: [], images: [], color: null, size: null, highlight: [], body: '' };
+}
