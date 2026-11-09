@@ -2,10 +2,10 @@
 //! frontmatter map, the body hash (section 4) and the derived display state
 //! (section 5). The board only reads the map; the runner is its only writer.
 
-use std::collections::BTreeMap;
 use std::path::{Component, Path};
 
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_yaml::{Mapping, Value};
 use sha2::{Digest, Sha256};
 
 /// Highest protocol version the board understands.
@@ -14,38 +14,18 @@ pub const PROTOCOL_VERSION: u64 = 1;
 pub const HASH_PREFIX: &str = "sha256:";
 /// Folder under the tips folder where the runner puts results (section 7).
 pub const RESULTS_DIR: &str = "agent";
+/// The sub-keys the board reads (protocol section 2). Everything else in the
+/// map is carried, never interpreted.
+pub const VIEW_KEYS: [&str; 7] = ["v", "state", "hash", "host", "run", "at", "results"];
 
-/// The `agent` map as the runner writes it. Every field is optional and any
-/// sub-key not listed here is preserved in `extra`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct AgentMeta {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub v: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub results: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_yaml::Value>,
-}
-
-/// The `agent` frontmatter value. A map with the expected types is `Typed`;
-/// anything else (a scalar, a list, `v: two`, `host: 42`) is kept verbatim as
-/// `Raw` so a malformed value never makes the tip unreadable or gets lost.
+/// The `agent` frontmatter value exactly as parsed: any YAML value, mapping
+/// keys in document order, nulls, empty values and unknown sub-keys
+/// included. It is written back from this value, so every board write keeps
+/// it as the runner wrote it (quoting style aside). The fields the board
+/// needs are read through a lenient view; nothing here is ever changed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Agent {
-    Typed(AgentMeta),
-    Raw(serde_yaml::Value),
-}
+#[serde(transparent)]
+pub struct Agent(Value);
 
 /// `deserialize_with` for `FrontMatter::agent`: a present key always yields
 /// `Some`, even `agent: null`, so the board writes back what it read.
@@ -77,46 +57,83 @@ struct View<'a> {
 }
 
 impl Agent {
+    pub fn new(value: Value) -> Self {
+        Agent(value)
+    }
+
+    /// The value as parsed.
+    pub fn value(&self) -> &Value {
+        &self.0
+    }
+
+    fn map(&self) -> Option<&Mapping> {
+        self.0.as_mapping()
+    }
+
     fn view(&self) -> View<'_> {
-        match self {
-            Agent::Typed(m) => View {
-                newer_version: m.v.is_some_and(|v| v > PROTOCOL_VERSION),
-                state: m.state.as_deref(),
-                hash: m.hash.as_deref(),
-            },
-            Agent::Raw(serde_yaml::Value::Mapping(map)) => View {
-                newer_version: map.get("v").is_some_and(above_version),
-                state: map.get("state").and_then(serde_yaml::Value::as_str),
-                hash: map.get("hash").and_then(serde_yaml::Value::as_str),
-            },
-            Agent::Raw(_) => View::default(),
+        let Some(map) = self.map() else {
+            return View::default();
+        };
+        View {
+            newer_version: map.get("v").is_some_and(above_version),
+            state: map.get("state").and_then(Value::as_str),
+            hash: map.get("hash").and_then(Value::as_str),
         }
     }
 
-    /// A string sub-key, whether or not the map as a whole is well typed.
+    /// A string sub-key; `None` when absent, not a string, or the value is
+    /// not a map at all.
     pub fn text(&self, key: &str) -> Option<&str> {
-        match self {
-            Agent::Typed(m) => match key {
-                "state" => m.state.as_deref(),
-                "hash" => m.hash.as_deref(),
-                "host" => m.host.as_deref(),
-                "run" => m.run.as_deref(),
-                "at" => m.at.as_deref(),
-                "results" => m.results.as_deref(),
-                other => m.extra.get(other).and_then(serde_yaml::Value::as_str),
-            },
-            Agent::Raw(serde_yaml::Value::Mapping(map)) => {
-                map.get(key).and_then(serde_yaml::Value::as_str)
+        self.map()?.get(key).and_then(Value::as_str)
+    }
+
+    /// The read-only view the UI gets as JSON: the `VIEW_KEYS` whose values
+    /// are text, finite numbers or booleans. `None` unless the value is a map.
+    /// Always representable as JSON, whatever the map holds.
+    pub fn json_view(&self) -> Option<serde_json::Value> {
+        let map = self.map()?;
+        let view = VIEW_KEYS
+            .iter()
+            .filter_map(|&key| Some((key.to_string(), json_scalar(map.get(key)?)?)))
+            .collect();
+        Some(serde_json::Value::Object(view))
+    }
+
+    /// The value as YAML text, for the JSON cache.
+    pub fn to_yaml(&self) -> Result<String, serde_yaml::Error> {
+        serde_yaml::to_string(&self.0)
+    }
+
+    /// The value back from `to_yaml` text.
+    pub fn from_yaml(text: &str) -> Result<Self, serde_yaml::Error> {
+        serde_yaml::from_str(text).map(Agent)
+    }
+}
+
+/// A YAML scalar as JSON, if JSON can hold it.
+fn json_scalar(value: &Value) -> Option<serde_json::Value> {
+    match value {
+        Value::String(s) => Some(serde_json::Value::String(s.clone())),
+        Value::Bool(b) => Some(serde_json::Value::Bool(*b)),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Some(i.into())
+            } else if let Some(u) = n.as_u64() {
+                Some(u.into())
+            } else {
+                n.as_f64()
+                    .and_then(serde_json::Number::from_f64)
+                    .map(serde_json::Value::Number)
             }
-            Agent::Raw(_) => None,
         }
+        _ => None,
     }
 }
 
 /// A number above the protocol version (`2`, `2.0`); other values are ignored.
-fn above_version(v: &serde_yaml::Value) -> bool {
+fn above_version(v: &Value) -> bool {
     match v {
-        serde_yaml::Value::Number(n) => n.as_f64().is_some_and(|f| f > PROTOCOL_VERSION as f64),
+        Value::Number(n) => n.as_f64().is_some_and(|f| f > PROTOCOL_VERSION as f64),
         _ => false,
     }
 }
@@ -244,12 +261,15 @@ mod tests {
     }
 
     fn typed(state: Option<&str>, hash: Option<String>) -> Agent {
-        Agent::Typed(AgentMeta {
-            v: Some(1),
-            state: state.map(str::to_string),
-            hash,
-            ..Default::default()
-        })
+        let mut map = Mapping::new();
+        map.insert("v".into(), 1.into());
+        if let Some(s) = state {
+            map.insert("state".into(), s.into());
+        }
+        if let Some(h) = hash {
+            map.insert("hash".into(), h.into());
+        }
+        Agent::new(Value::Mapping(map))
     }
 
     const BODY: &str = "Survey hairpin AC loss.\n";
@@ -264,12 +284,11 @@ mod tests {
             None
         );
         // v above 1
-        let newer = Agent::Typed(AgentMeta {
-            v: Some(2),
-            state: Some("done".into()),
-            hash: h(),
-            ..Default::default()
-        });
+        let newer: Agent = serde_yaml::from_str(&format!(
+            "{{v: 2, state: done, hash: '{}'}}",
+            body_hash(BODY)
+        ))
+        .unwrap();
         assert_eq!(st(&newer), None);
         // running wins over a stale or missing hash
         assert_eq!(st(&typed(Some("running"), None)), Some(AgentState::Running));
@@ -322,7 +341,6 @@ mod tests {
         let h = body_hash(BODY);
         // Wrong type on a field the state does not need: still Done.
         let odd = raw(&format!("{{v: 1, state: done, hash: '{h}', host: 42}}"));
-        assert!(matches!(odd, Agent::Raw(_)));
         assert_eq!(
             display_state(true, Some(&odd), BODY),
             Some(AgentState::Done)
@@ -364,19 +382,38 @@ mod tests {
     }
 
     #[test]
-    fn typed_map_parses_with_unknown_keys() {
+    fn the_view_reads_known_keys_and_carries_the_rest() {
         let a: Agent = serde_yaml::from_str(
-            "v: 1\nstate: question\nhash: sha256:ab\nhost: DESK\nrun: 20261109-073100-ab12\nat: 2026-11-09T07:31:00\nresults: agent/x/\nzeta: [1, 2]\n",
+            "zeta: [1, 2]\nv: 1\nstate: question\nhash: sha256:ab\nhost: DESK\nrun: 20261109-073100-ab12\nat: 2026-11-09T07:31:00\nresults: agent/x/\n",
         )
         .unwrap();
-        let Agent::Typed(m) = &a else {
-            panic!("expected typed: {a:?}")
-        };
-        assert_eq!(m.v, Some(1));
-        assert_eq!(m.at.as_deref(), Some("2026-11-09T07:31:00"));
-        assert_eq!(m.results.as_deref(), Some("agent/x/"));
-        assert!(m.extra.contains_key("zeta"));
+        assert_eq!(a.text("at"), Some("2026-11-09T07:31:00"));
+        assert_eq!(a.text("results"), Some("agent/x/"));
         assert_eq!(a.text("run"), Some("20261109-073100-ab12"));
+        // The value itself is untouched: same keys, same order.
+        let keys: Vec<&str> = a
+            .value()
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            ["zeta", "v", "state", "hash", "host", "run", "at", "results"]
+        );
+        // The JSON view has only the known keys, and only JSON-safe values.
+        let view = a.json_view().unwrap();
+        assert_eq!(view["v"], 1);
+        assert_eq!(view["host"], "DESK");
+        assert!(view.get("zeta").is_none());
+        let odd: Agent = serde_yaml::from_str("{v: .nan, host: [x], 1: y, run: true}").unwrap();
+        assert_eq!(odd.json_view().unwrap(), serde_json::json!({ "run": true }));
+        let list: Agent = serde_yaml::from_str("[a, b]").unwrap();
+        assert_eq!(list.json_view(), None);
+        // YAML text round trip, as the cache stores it.
+        let back = Agent::from_yaml(&a.to_yaml().unwrap()).unwrap();
+        assert_eq!(back, a);
     }
 
     #[test]
