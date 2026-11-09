@@ -9,6 +9,8 @@ conventional-commit history; the version a commit shipped in is the first
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-09
+
 ### Added
 
 - Agent tips (protocol v1, `docs/AGENT-PROTOCOL.md`): `kind: agent` is a
@@ -259,7 +261,8 @@ plugin version mismatch. 0.5.1 is the same code plus that fix.
 
 - First release: an always-on-top tile board synced with GitHub.
 
-[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Zwl20085/vindictive/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/Zwl20085/vindictive/compare/v0.5.1...v0.5.3
 [0.5.1]: https://github.com/Zwl20085/vindictive/compare/v0.4.0...v0.5.1
 [0.4.0]: https://github.com/Zwl20085/vindictive/compare/v0.3.3...v0.4.0
