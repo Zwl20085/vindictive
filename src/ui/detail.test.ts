@@ -197,3 +197,32 @@ describe('agent detail', () => {
     expect(render({ ...agentTip, kind: 'task', agent_state: undefined }).panel.querySelector('.detail-agent')).toBeNull();
   });
 });
+
+describe('question detail', () => {
+  const question = (extra: Partial<Tip> = {}): Tip => tip({ id: 'questions/a', path: 'questions/a.md', ...extra });
+
+  it('says it is a question in the header, in words', () => {
+    const { panel } = render(question());
+    const kind = panel.querySelector('.detail-kind');
+    expect(kind?.textContent).toContain('Question');
+    const badge = kind?.querySelector('.detail-question-badge');
+    expect(badge?.textContent).toBe('❓');
+    expect(badge?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('shows no agent block, even for kind agent with an agent map', () => {
+    const { panel } = render(question({ kind: 'agent', agent: { v: 1, state: 'done', host: 'PC', results: 'agent/a/' } }));
+    expect(panel.querySelector('.detail-agent')).toBeNull();
+    expect(panel.querySelector('.detail-agent-results')).toBeNull();
+    expect(panel.querySelector('.detail-kind')?.textContent).not.toContain('Agent');
+  });
+
+  it('keeps Edit and Done, like any tip', async () => {
+    const { panel, a } = render(question());
+    const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>('.detail-actions button'));
+    buttons.find((b) => b.textContent === 'Edit')?.click();
+    expect(a.onEdit).toHaveBeenCalledWith('questions/a');
+    buttons.find((b) => b.textContent === 'Done')?.click();
+    await vi.waitFor(() => expect(a.onDone).toHaveBeenCalledWith('questions/a'));
+  });
+});

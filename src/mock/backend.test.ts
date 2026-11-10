@@ -258,3 +258,96 @@ describe('mock open_agent_results', () => {
     }
   });
 });
+
+describe('mock question tips', () => {
+  const form = (patch: Partial<TipEdit> = {}): TipEdit => ({
+    title: 'Which mesh density?',
+    kind: 'agent',
+    priority: 'normal',
+    due: null,
+    location: null,
+    tags: [],
+    remind: [],
+    repeat: null,
+    links: [],
+    images: [],
+    color: null,
+    size: null,
+    highlight: [],
+    body: '## 1. Mesh\n\n- [x] fine\n\nAnswer: fine\n',
+    ...patch,
+  });
+
+  it('the sample board has a question tip in questions/', async () => {
+    const state = await mockInvoke('get_state');
+    const question = state.tips.find((t) => t.path.startsWith('questions/'));
+    expect(question?.id).toBe(question?.path.replace(/\.md$/, ''));
+    expect(question?.agent_state).toBeUndefined();
+  });
+
+  it('edits and Done keep the question in questions/, never as an agent task', async () => {
+    const state = await mockInvoke('get_state');
+    const question = state.tips.find((t) => t.path.startsWith('questions/'));
+    if (!question) throw new Error('no sample question');
+    const edited = await mockInvoke('update_tip', { id: question.id, base: question.sha ?? null, edit: form() });
+    const after = edited.tips.find((t) => t.id === question.id);
+    expect(after?.path).toBe(question.path);
+    expect(after?.kind).toBe('agent');
+    expect(after?.agent_state).toBeUndefined();
+    await expect(mockInvoke('open_agent_results', { id: question.id })).rejects.toThrow(/question/);
+    // Kind agent does not make a question an agent task: the title is still needed.
+    const now2 = (await mockInvoke('get_state')).tips.find((t) => t.id === question.id);
+    await expect(mockInvoke('update_tip', { id: question.id, base: now2?.sha ?? null, edit: form({ title: ' ' }) })).rejects.toThrow(/needs a title/);
+    const done = await mockInvoke('mark_done', { id: question.id });
+    expect(done.tips.find((t) => t.id === question.id)).toMatchObject({ status: 'done', path: question.path });
+  });
+
+  it('new tips always go to the main folder', async () => {
+    const quick = await mockInvoke('create_tip', { text: 'Quick one' });
+    const full = await mockInvoke('create_tip_full', { edit: form({ title: 'Full one', kind: 'note' }) });
+    for (const t of [quick.tips.find((x) => x.title === 'Quick one'), full.tips.find((x) => x.title === 'Full one')]) {
+      expect(t?.path).toMatch(/^[^/]+\.md$/);
+      expect(t?.id).not.toContain('/');
+    }
+  });
+});
+
+describe('mock agent tips need only the prompt', () => {
+  const agentForm = (patch: Partial<TipEdit> = {}): TipEdit => ({
+    title: '',
+    kind: 'agent',
+    priority: 'normal',
+    due: null,
+    location: null,
+    tags: [],
+    remind: [],
+    repeat: null,
+    links: [],
+    images: [],
+    color: null,
+    size: null,
+    highlight: [],
+    body: '## Survey **hairpin** AC loss\n\nFind three recent papers.\n',
+    ...patch,
+  });
+
+  it('quick capture >agent puts the whole text in the body and derives the title', async () => {
+    const text = 'Survey hairpin AC loss papers from 2020 on, with a table of measured vs. FE results #lit >agent';
+    const state = await mockInvoke('create_tip', { text });
+    const made = state.tips.find((t) => t.tags?.includes('lit') && t.kind === 'agent');
+    expect(made?.title).toBe('Survey hairpin AC loss papers from 2020 on, with a table of…');
+    expect(made?.body).toBe('Survey hairpin AC loss papers from 2020 on, with a table of measured vs. FE results\n');
+    expect(made?.agent_state).toBe('queued');
+    expect(parseCaptureText('>agent Find three papers', now)).toMatchObject({ title: 'Find three papers', body: 'Find three papers\n' });
+    // Other kinds: unchanged, the text is the title.
+    expect(parseCaptureText('Buy coolant', now)).toMatchObject({ title: 'Buy coolant', body: '' });
+  });
+
+  it('the form with an empty title derives it; the body stays as typed', async () => {
+    const state = await mockInvoke('create_tip_full', { edit: agentForm() });
+    const made = state.tips.find((t) => t.title === 'Survey hairpin AC loss');
+    expect(made?.body).toBe('## Survey **hairpin** AC loss\n\nFind three recent papers.\n');
+    await expect(mockInvoke('create_tip_full', { edit: agentForm({ body: ' ' }) })).rejects.toThrow(/prompt/);
+    await expect(mockInvoke('create_tip_full', { edit: agentForm({ kind: 'note' }) })).rejects.toThrow(/title/);
+  });
+});

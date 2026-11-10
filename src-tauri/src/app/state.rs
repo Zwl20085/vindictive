@@ -18,6 +18,7 @@ use super::notify::{self, Toast};
 use super::settings::Settings;
 use super::storage::Storage;
 use crate::core::nextup::{next_up, ordered};
+use crate::core::question::is_question_path;
 use crate::core::tip::Tip;
 use crate::sync::folder::{conflict_summary, FileEntry, FolderError, FolderStore};
 use crate::sync::weather::Weather;
@@ -70,8 +71,13 @@ pub struct Inner {
     /// removal is applied only if the next scan is empty too, so a folder
     /// that briefly vanishes (OneDrive unmounting) does not wipe the board.
     pub pending_wipe: bool,
+    /// The same for `questions/`, which can empty on its own.
+    pub pending_wipe_questions: bool,
     /// OneDrive conflict copies in the last listing, as one line.
     pub conflicts: Option<String>,
+    /// Why `questions/` could not be read on the last scan, if it could not.
+    /// Its tips stay on the board meanwhile.
+    pub questions_error: Option<String>,
     /// A scan has completed since start; the first one announces no agent
     /// news (the cache may be old).
     pub scanned: bool,
@@ -257,7 +263,10 @@ impl AppState {
         let result = self.sync_scan();
         let error = match &result {
             Err(e) => Some(e.clone()),
-            Ok(_) => self.with(|i| sync_summary(&i.broken, i.conflicts.as_deref())),
+            Ok(_) => self.with(|i| {
+                let notes = join_notes(i.conflicts.as_deref(), i.questions_error.as_deref());
+                sync_summary(&i.broken, notes.as_deref())
+            }),
         };
         let error_changed = self.with(|i| {
             let changed = i.sync_error != error;
@@ -303,26 +312,40 @@ impl AppState {
                 .map(|t| (t.path.clone(), t.sha.clone()))
                 .collect()
         });
-        let listing = store.list().map_err(|e| e.to_string())?;
+        let scan = store.scan().map_err(|e| e.to_string())?;
+        let listing = scan.files;
+        if let Some(e) = &scan.questions_error {
+            log::warn!("questions folder not read this time: {e}");
+        }
+        let questions_unread = scan.questions_error.is_some();
         // The copies stay on the board as tips; the summary only flags them.
         let conflicts = conflict_summary(&listing);
-        self.with(|i| i.conflicts = conflicts);
-        if listing.is_empty() && !seen.is_empty() {
-            // Apply an empty folder only when two scans in a row agree.
-            let confirmed = self.with(|i| {
-                let confirmed = i.pending_wipe;
-                i.pending_wipe = !confirmed;
-                confirmed
-            });
-            if !confirmed {
-                log::warn!(
-                    "tips folder is empty but the board has {} tips; waiting for the next scan",
-                    seen.len()
-                );
-                return Ok((false, Vec::new(), Vec::new()));
-            }
-        } else {
-            self.with(|i| i.pending_wipe = false);
+        self.with(|i| {
+            i.conflicts = conflicts;
+            i.questions_error = scan.questions_error;
+        });
+        // An area (the main folder, `questions/`) that lists empty while the
+        // board has tips there is applied only when two scans in a row
+        // agree, so a folder that briefly vanishes (OneDrive unmounting, a
+        // sync in progress) does not wipe its tips. Each area on its own: the
+        // other one may well still list files.
+        let (hold_main, hold_questions) = self.with(|i| {
+            let main = hold_vanished(area_vanished(&seen, &listing, false), &mut i.pending_wipe);
+            let questions = !questions_unread && area_vanished(&seen, &listing, true);
+            (
+                main,
+                hold_vanished(questions, &mut i.pending_wipe_questions),
+            )
+        });
+        if hold_main || hold_questions {
+            log::warn!(
+                "{} is empty but the board has tips there; waiting for the next scan",
+                if hold_main {
+                    "the tips folder"
+                } else {
+                    "questions/"
+                }
+            );
         }
         let stamps: HashMap<&str, &str> = listing
             .iter()
@@ -344,6 +367,15 @@ impl AppState {
         });
         let mut plan = plan(&seen, &listing);
         plan.to_fetch.retain(|path| !skipped.contains(path));
+        plan.removed = still_removed(plan.removed, questions_unread);
+        plan.removed.retain(|path| {
+            let held = if is_question_path(path) {
+                hold_questions
+            } else {
+                hold_main
+            };
+            !held
+        });
         if plan.to_fetch.is_empty() && plan.removed.is_empty() {
             self.with(|i| i.scanned = true);
             return Ok((false, Vec::new(), Vec::new()));
@@ -560,6 +592,46 @@ fn plan(seen: &[(String, Option<String>)], files: &[FileEntry]) -> SyncPlan {
 /// arrival: too many to toast one by one.
 fn is_bulk(new: usize, total: usize) -> bool {
     new > MAX_ANNOUNCED_NEW_TIPS || (new >= BULK_MIN_NEW_TIPS && new * 2 > total)
+}
+
+/// The board has tips in one area (`questions/` when `questions`, else the
+/// main folder) and the listing has none there.
+fn area_vanished(
+    seen: &[(String, Option<String>)],
+    listing: &[FileEntry],
+    questions: bool,
+) -> bool {
+    let in_area = |path: &str| is_question_path(path) == questions;
+    seen.iter().any(|(p, _)| in_area(p)) && !listing.iter().any(|f| in_area(&f.path))
+}
+
+/// Whether to hold off removing a vanished area this scan: the first scan
+/// that sees it empty holds (and remembers), the second applies. An area
+/// that lists again forgets.
+fn hold_vanished(vanished: bool, pending: &mut bool) -> bool {
+    let hold = vanished && !*pending;
+    *pending = hold;
+    hold
+}
+
+/// Paths gone from the listing that really are gone: while `questions/`
+/// could not be read, its tips are missing from the listing but not deleted.
+fn still_removed(removed: Vec<String>, questions_unread: bool) -> Vec<String> {
+    if !questions_unread {
+        return removed;
+    }
+    removed
+        .into_iter()
+        .filter(|path| !is_question_path(path))
+        .collect()
+}
+
+/// Two optional notes for the sync dot as one line.
+fn join_notes(first: Option<&str>, second: Option<&str>) -> Option<String> {
+    match (first, second) {
+        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
+        (a, b) => a.or(b).map(str::to_string),
+    }
 }
 
 /// Broken files and conflict copies together, for the sync dot.
@@ -844,6 +916,62 @@ more
     }
 
     #[test]
+    fn an_area_that_empties_waits_for_a_second_scan_while_the_other_has_files() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        let questions = folder.path().join("questions");
+        std::fs::create_dir(&questions).unwrap();
+        write_tip(folder.path(), "a.md", "A");
+        write_tip(folder.path(), "b.md", "B");
+        write_tip(&questions, "q.md", "Q");
+        state.sync_inner().unwrap();
+        assert_eq!(state.with(|i| i.board.tips.len()), 3);
+
+        // The main folder blinks out while `questions/` still lists: the main
+        // tips stay for one scan, and come back without being announced.
+        std::fs::remove_file(folder.path().join("a.md")).unwrap();
+        std::fs::remove_file(folder.path().join("b.md")).unwrap();
+        state.sync_inner().unwrap();
+        assert_eq!(state.with(|i| i.board.tips.len()), 3, "main tips kept");
+        write_tip(folder.path(), "a.md", "A");
+        write_tip(folder.path(), "b.md", "B");
+        let (_, new_ids) = state.sync_inner().unwrap();
+        assert!(new_ids.is_empty(), "{new_ids:?}");
+        // Empty on two scans in a row: really gone, questions untouched.
+        std::fs::remove_file(folder.path().join("a.md")).unwrap();
+        std::fs::remove_file(folder.path().join("b.md")).unwrap();
+        state.sync_inner().unwrap();
+        assert!(state.tip("a").is_some());
+        state.sync_inner().unwrap();
+        assert!(state.tip("a").is_none() && state.tip("b").is_none());
+        assert!(state.tip("questions/q").is_some());
+
+        // The same for `questions/` emptying while the main folder has files.
+        write_tip(folder.path(), "a.md", "A");
+        state.sync_inner().unwrap();
+        std::fs::remove_file(questions.join("q.md")).unwrap();
+        state.sync_inner().unwrap();
+        assert!(state.tip("questions/q").is_some(), "kept for one scan");
+        state.sync_inner().unwrap();
+        assert!(state.tip("questions/q").is_none());
+        assert!(state.tip("a").is_some());
+    }
+
+    #[test]
+    fn deleting_one_tip_of_several_in_an_area_needs_no_second_scan() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        write_tip(folder.path(), "a.md", "A");
+        write_tip(folder.path(), "b.md", "B");
+        state.sync_inner().unwrap();
+        std::fs::remove_file(folder.path().join("a.md")).unwrap();
+        assert!(state.sync_inner().unwrap().0);
+        assert!(state.tip("a").is_none());
+    }
+
+    #[test]
     fn bulk_arrivals_are_not_announced() {
         let folder = tempfile::tempdir().unwrap();
         let data = tempfile::tempdir().unwrap();
@@ -988,6 +1116,112 @@ more
             Some("cannot load b.md: bad; c")
         );
         assert_eq!(sync_summary(&HashMap::new(), None), None);
+    }
+
+    #[test]
+    fn question_tips_load_beside_main_tips_of_the_same_name() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        write_tip(folder.path(), "a.md", "Main A");
+        // No `questions/` yet: a normal board, no error, nothing created.
+        let (changed, _) = state.sync_inner().unwrap();
+        assert!(changed);
+        assert!(state
+            .with(|i| sync_summary(&i.broken, i.conflicts.as_deref()))
+            .is_none());
+        assert!(!folder.path().join("questions").exists());
+
+        let questions = folder.path().join("questions");
+        std::fs::create_dir(&questions).unwrap();
+        write_tip(&questions, "a.md", "Which mesh?");
+        let (changed, new_ids) = state.sync_inner().unwrap();
+        assert!(changed);
+        assert_eq!(new_ids, vec!["questions/a".to_string()]);
+        let main = state.tip("a").unwrap();
+        let question = state.tip("questions/a").unwrap();
+        assert_eq!(
+            (main.front.title.as_str(), main.path.as_str()),
+            ("Main A", "a.md")
+        );
+        assert_eq!(question.front.title, "Which mesh?");
+        assert_eq!(question.path, "questions/a.md");
+        assert!(question.is_question() && !main.is_question());
+
+        // An answer saved from the board goes back into `questions/` and
+        // leaves the main tip alone, on disk and on the board.
+        let answered = question.complete(now());
+        let text = answered.to_markdown().unwrap();
+        let store = FolderStore::open(folder.path()).unwrap();
+        let stamp = store
+            .write_text(&answered.path, &text, question.sha.as_deref())
+            .unwrap();
+        state.update_board(|b| {
+            b.upsert(Tip {
+                sha: Some(stamp),
+                ..answered.clone()
+            })
+        });
+        assert_eq!(state.with(|i| i.board.tips.len()), 2);
+        assert_eq!(state.tip("a").unwrap(), main);
+        assert!(std::fs::read_to_string(questions.join("a.md"))
+            .unwrap()
+            .contains("status: done"));
+        assert!(!std::fs::read_to_string(folder.path().join("a.md"))
+            .unwrap()
+            .contains("status: done"));
+        assert_eq!(state.sync_inner().unwrap(), (false, vec![]));
+
+        // The cache keeps both apart across a restart.
+        let restarted = AppState::load(Storage::new(data.path().to_path_buf()));
+        assert_eq!(restarted.tip("questions/a").unwrap().path, "questions/a.md");
+        assert_eq!(restarted.tip("a").unwrap().path, "a.md");
+
+        // Removing the question removes only it (the last one in its
+        // folder, so after the second scan that agrees).
+        std::fs::remove_file(questions.join("a.md")).unwrap();
+        state.sync_inner().unwrap();
+        assert!(state.sync_inner().unwrap().0);
+        assert!(state.tip("questions/a").is_none());
+        assert!(state.tip("a").is_some());
+    }
+
+    #[test]
+    fn unreadable_questions_keep_their_tips_and_show_in_the_sync_dot() {
+        let removed = vec!["a.md".to_string(), "questions/q.md".to_string()];
+        assert_eq!(still_removed(removed.clone(), false), removed);
+        assert_eq!(still_removed(removed, true), vec!["a.md".to_string()]);
+        assert_eq!(
+            join_notes(Some("copy"), Some("cannot list questions")).as_deref(),
+            Some("copy; cannot list questions")
+        );
+        assert_eq!(join_notes(None, Some("q")).as_deref(), Some("q"));
+        assert_eq!(join_notes(None, None), None);
+    }
+
+    #[test]
+    fn question_tips_raise_no_agent_toasts() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = state_in(folder.path(), data.path());
+        let questions = folder.path().join("questions");
+        std::fs::create_dir(&questions).unwrap();
+        std::fs::write(questions.join("s.md"), agent_file("running", "P\n")).unwrap();
+        state.sync_scan().unwrap();
+        assert_eq!(state.tip("questions/s").unwrap().agent_state, None);
+        std::fs::write(
+            questions.join("s.md"),
+            agent_file("question", "P\n\nmore\n"),
+        )
+        .unwrap();
+        set_mtime(
+            &questions.join("s.md"),
+            std::time::SystemTime::now() + Duration::from_secs(2),
+        );
+        let (changed, _, toasts) = state.sync_scan().unwrap();
+        assert!(changed);
+        assert!(toasts.is_empty(), "{toasts:?}");
+        assert_eq!(state.tip("questions/s").unwrap().agent_state, None);
     }
 
     #[test]

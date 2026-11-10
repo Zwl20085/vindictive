@@ -6,6 +6,7 @@ import { DEADLINE_COLORS, KIND_COLORS, OVERDUE_COLOR, tileColor } from '../lib/t
 import { TILE_SIZES, tileSize, type TileSize } from '../lib/tileSize';
 import { isRelativeSrc, renderMarkdown, resolveImages, type ImageResolver } from '../lib/markdown';
 import { highlightNode, highlightText, wordsFor } from '../lib/highlight';
+import { displayKind, isQuestion, QUESTION_BADGE } from '../lib/question';
 import { el } from './dom';
 import { KIND_GLYPH, labelFor } from './glyphs';
 import type { VersionedResolver } from './images';
@@ -50,7 +51,16 @@ export interface DetailOptions {
 
 function subtitle(tip: Tip, now: Date): string {
   const due = parseNaive(tip.due_at);
-  return due ? `${countdown(due, now, locale())} · ${formatLocal(due, locale())}` : labelFor(tip.kind);
+  return due ? `${countdown(due, now, locale())} · ${formatLocal(due, locale())}` : labelFor(displayKind(tip));
+}
+
+/** Kind glyph and label; a question tip leads with ❓ and the word. */
+function kindLine(tip: Tip): HTMLElement {
+  const kind = displayKind(tip);
+  const question = isQuestion(tip)
+    ? [el('span', { className: 'detail-question-badge', 'aria-hidden': 'true', text: QUESTION_BADGE }), ` ${t('question')} · `]
+    : [];
+  return el('span', { className: 'detail-kind' }, ...question, el('span', { 'aria-hidden': 'true', text: KIND_GLYPH[kind] }), ` ${labelFor(kind)}`);
 }
 
 function header(tip: Tip, now: Date, words: readonly string[]): HTMLElement {
@@ -58,7 +68,7 @@ function header(tip: Tip, now: Date, words: readonly string[]): HTMLElement {
   return el(
     'header',
     { className: 'detail-header' },
-    el('span', { className: 'detail-kind' }, el('span', { 'aria-hidden': 'true', text: KIND_GLYPH[tip.kind] }), ` ${labelFor(tip.kind)}`),
+    kindLine(tip),
     el('h1', { className: 'detail-title' }, el('span', { className: 'detail-title-text' }, highlightText(tip.title, { words, auto: false }))),
     el('p', { className: 'detail-sub', text: sub }),
   );
@@ -92,9 +102,10 @@ function metaRows(tip: Tip, words: readonly string[]): HTMLElement | null {
   return rows.length ? el('ul', { className: 'detail-meta' }, ...rows) : null;
 }
 
-/** Agent state in words, where and when it last changed, and the results. */
+/** Agent state in words, where and when it last changed, and the results.
+ *  None for a question tip, which is never an agent task. */
 function agentBlock(tip: Tip, onOpenResults: (id: string) => void): HTMLElement | null {
-  if (tip.kind !== 'agent') return null;
+  if (displayKind(tip) !== 'agent') return null;
   const info = agentInfo(tip);
   const state = tip.agent_state;
   const at = parseNaive(info.at);

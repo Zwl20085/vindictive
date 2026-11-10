@@ -118,6 +118,27 @@
   color: #ffb648;
 }
 
+/* Question tips (`questions/`): the same big ❓ square as an agent
+   question, so a tip waiting for the owner's answer reads alike. */
+.tile-question-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: clamp(18px, 24cqh, 34px);
+  height: clamp(18px, 24cqh, 34px);
+  font-family: 'Segoe UI Emoji', 'Segoe UI Symbol', var(--font);
+  font-size: clamp(14px, 18cqh, 26px);
+  line-height: 1;
+  letter-spacing: 0;
+  color: #ff5a4f;
+  background: rgb(0 0 0 / 0.38);
+}
+
+.tile-done .tile-question-badge {
+  background: none;
+  font-size: clamp(11px, 10cqh, 18px);
+}
+
 /* Titles carry the Evangelion typography. */
 .tile-title {
   position: relative;

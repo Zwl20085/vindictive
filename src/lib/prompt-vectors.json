@@ -1,0 +1,102 @@
+[
+ [
+  "Find three recent papers on hairpin AC loss.",
+  "Find three recent papers on hairpin AC loss."
+ ],
+ [
+  "\n\n## Survey **hairpin** AC loss\nmore detail",
+  "Survey hairpin AC loss"
+ ],
+ [
+  "- [ ] Check [the paper](https://x.org/p) and `code` ![fig](a.png)",
+  "Check the paper and code fig"
+ ],
+ [
+  "Survey recent papers on AC copper loss in hairpin windings for traction motors",
+  "Survey recent papers on AC copper loss in hairpin windings\u2026"
+ ],
+ [
+  "\u8c03\u7814\u53d1\u5361\u7ed5\u7ec4\u4ea4\u6d41\u94dc\u8017\u7684\u6700\u65b0\u8bba\u6587\u5e76\u6574\u7406\u6210\u8868\u683c\u8c03\u7814\u53d1\u5361\u7ed5\u7ec4\u4ea4\u6d41\u94dc\u8017\u7684\u6700\u65b0\u8bba\u6587\u5e76\u6574\u7406\u6210\u8868\u683c\u8c03\u7814\u53d1\u5361\u7ed5\u7ec4\u4ea4\u6d41\u94dc\u8017\u7684\u6700\u65b0\u8bba\u6587\u5e76\u6574\u7406\u6210\u8868\u683c",
+  "\u8c03\u7814\u53d1\u5361\u7ed5\u7ec4\u4ea4\u6d41\u94dc\u8017\u7684\u6700\u65b0\u8bba\u6587\u5e76\u6574\u7406\u6210\u8868\u683c\u8c03\u7814\u53d1\u5361\u7ed5\u7ec4\u4ea4\u6d41\u94dc\u8017\u7684\u6700\u65b0\u8bba\u6587\u5e76\u6574\u7406\u6210\u8868\u683c\u8c03\u7814\u53d1\u5361\u7ed5\u7ec4\u4ea4\u6d41\u94dc\u8017\u7684\u6700\u65b0\u8bba\u6587\u5e76\u6574\u7406\u2026"
+ ],
+ [
+  "<!-- note -->\n---\n> 1. Real start",
+  "Real start"
+ ],
+ [
+  "Compare the FE results, the measurements, and the analytic model, then summarise",
+  "Compare the FE results, the measurements, and the analytic\u2026"
+ ],
+ [
+  "   \n\t\n",
+  null
+ ],
+ [
+  "",
+  null
+ ],
+ [
+  "**  **\nSecond line",
+  "Second line"
+ ],
+ [
+  "\uff11. \u8c03\u7814",
+  "\uff11. \u8c03\u7814"
+ ],
+ [
+  "\u0661. Survey",
+  "\u0661. Survey"
+ ],
+ [
+  "\ufeff# Title",
+  "Title"
+ ],
+ [
+  "a\u0085b",
+  "a b"
+ ],
+ [
+  "\u3000Indented\u3000title\u00a0 here\u3000",
+  "Indented title here"
+ ],
+ [
+  "\ufeff\n\ufeff\ufeff\nAfter BOMs",
+  "After BOMs"
+ ],
+ [
+  ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
+  ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,\u2026"
+ ],
+ [
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\udc69\u200d\ud83d\udcbbxxxxx",
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u2026"
+ ],
+ [
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaae\u0301zzz",
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u2026"
+ ],
+ [
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\udc4d\ud83c\udffdzz",
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u2026"
+ ],
+ [
+  "<!-- multi\nline comment -->\nReal title",
+  "Real title"
+ ],
+ [
+  "<!-- agent:begin 2026-11-09T19:31:00 done -->\n## \u2b50 Result\nFound 14 papers\n<!-- agent:end -->\nFollow-up question",
+  "Follow-up question"
+ ],
+ [
+  "Text before <!-- c --> after",
+  "Text before after"
+ ],
+ [
+  "<!-- agent:begin x -->\n## Result\nno end marker",
+  null
+ ],
+ [
+  "<!-- never closed\nstill comment",
+  null
+ ]
+]

@@ -7,6 +7,8 @@ pub mod deadline;
 pub mod edit;
 pub mod frontmatter;
 pub mod nextup;
+pub mod prompt;
+pub mod question;
 pub mod recur;
 pub mod template;
 pub mod timeparse;

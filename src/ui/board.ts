@@ -1,6 +1,7 @@
 import type { BoardState, Tip } from '../types';
 import { t } from '../lib/i18n';
 import { applyManualOrder, orderForMove } from '../lib/order';
+import { isQuestion } from '../lib/question';
 import { isSnoozed } from '../lib/urgency';
 import { el } from './dom';
 import type { VersionedResolver } from './images';
@@ -27,6 +28,12 @@ export interface BoardOptions {
    */
   seen?: Set<string>;
   resolveImage?: VersionedResolver;
+  /**
+   * Show only question tips (`questions/`). The "+" tile and reordering are
+   * off meanwhile: new tips never go to `questions/`, and an order computed
+   * among the shown subset would misplace tiles on the full board.
+   */
+  questionsOnly?: boolean;
 }
 
 /**
@@ -91,9 +98,11 @@ export function clampColumns(value: number | undefined): number {
   return Math.min(MAX_COLUMNS, Math.max(MIN_COLUMNS, Math.round(value)));
 }
 
-/** Tips the board should show, honouring the "show done" setting and manual order. */
-export function visibleTips(state: BoardState, now: Date): Tip[] {
+/** Tips the board should show, honouring the "show done" setting, the
+ *  questions filter and manual order. */
+export function visibleTips(state: BoardState, now: Date, questionsOnly = false): Tip[] {
   const shown = state.tips.filter((tip) => {
+    if (questionsOnly && !isQuestion(tip)) return false;
     if (tip.status === 'done') return state.settings.show_done;
     return !isSnoozed(tip, now);
   });
@@ -179,7 +188,8 @@ function isReady(state: BoardState): boolean {
   return state.settings.folder.trim().length > 0 && !state.sync_error;
 }
 
-function emptyMessage(state: BoardState, onSetup?: () => void): HTMLElement {
+function emptyMessage(state: BoardState, onSetup?: () => void, questionsOnly = false): HTMLElement {
+  if (questionsOnly && isReady(state)) return el('p', { className: 'board-empty', text: t('questionsEmpty') });
   if (isReady(state) || !onSetup) return el('p', { className: 'board-empty', text: t('emptyReady') });
   const button = el('button', { type: 'button', className: 'action action-primary', text: t('chooseFolder') });
   button.addEventListener('click', onSetup);
@@ -219,7 +229,9 @@ function arrange(grid: HTMLElement, nodes: readonly HTMLElement[]): void {
  * ones whose titles need fitting.
  */
 export function updateBoard(grid: HTMLElement, options: BoardOptions): HTMLElement[] {
-  const { state, now, onOpen, onMenu, onAdd, onSetup, onReorder, seen, resolveImage } = options;
+  const { state, now, onOpen, onMenu, onSetup, seen, resolveImage, questionsOnly = false } = options;
+  const onAdd = questionsOnly ? undefined : options.onAdd;
+  const onReorder = questionsOnly ? undefined : options.onReorder;
   const columns = clampColumns(state.settings.columns);
   const highlightWords = state.settings.highlight_words ?? [];
   grid.style.setProperty('--cols', String(columns));
@@ -227,12 +239,13 @@ export function updateBoard(grid: HTMLElement, options: BoardOptions): HTMLEleme
   const existingAdd = Array.from(grid.children).find((c): c is HTMLButtonElement => c.classList.contains('tile-add'));
   const plus = (): HTMLButtonElement | null => (onAdd ? existingAdd ?? addTile(onAdd) : null);
 
-  const tips = visibleTips(state, now);
+  const tips = visibleTips(state, now, questionsOnly);
   if (tips.length === 0) {
     shared.ranked = [];
     shared.onReorder = onReorder;
     const add = isReady(state) ? plus() : null;
-    arrange(grid, add ? [emptyMessage(state, onSetup), add] : [emptyMessage(state, onSetup)]);
+    const empty = emptyMessage(state, onSetup, questionsOnly);
+    arrange(grid, add ? [empty, add] : [empty]);
     return [];
   }
 

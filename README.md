@@ -221,14 +221,26 @@ Full reference: [docs/TIP-FORMAT.md](docs/TIP-FORMAT.md).
 
 ### Agent tips
 
-A tip with `kind: agent` is a task for an AI agent: write what you want in
-the title and body, and a separate runner ([Claude Graph](https://github.com/Zwl20085/claude-graph))
+A tip with `kind: agent` is a task for an AI agent: write what you want as
+the prompt (the title is optional and taken from the prompt; in the new-tip
+form the kind *Agent* shows just a Prompt field, other fields folded away;
+`>agent <text>` in quick capture makes the text the prompt), and a separate runner ([Claude Graph](https://github.com/Zwl20085/claude-graph))
 runs it and writes the outcome back into the file. The tile shows 🕓 waiting,
 ⚙ running, ⭐ finished, ❓ a question for you, or ⚠ failed; answer a question
 by typing in the body. The board only reads the `agent` frontmatter map and
 keeps it through every edit. The contract between the two apps is
 [docs/AGENT-PROTOCOL.md](docs/AGENT-PROTOCOL.md); the board's side is in
 [docs/TIP-FORMAT.md](docs/TIP-FORMAT.md#agent-tips).
+
+### Question tips
+
+A Claude session that needs your decision writes a normal tip into the
+`questions/` subfolder of the tips folder: one heading per question,
+task-list options (`- [ ]`) and an `Answer:` line. The board shows those
+tiles with a ❓ badge, and the strip menu's **Questions only** filters the
+board to them. Answer by editing the text (in the Edit form or your editor:
+`- [ ]` to `- [x]`, or type after `Answer:`; the checkboxes on screen cannot
+be clicked) and press Done; the file stays in `questions/`. Details: [docs/TIP-FORMAT.md](docs/TIP-FORMAT.md#question-tips).
 
 ### Quick-capture syntax
 

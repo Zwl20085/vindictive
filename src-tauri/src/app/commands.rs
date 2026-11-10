@@ -15,9 +15,10 @@ use super::{editor, hotkeys, windows};
 use crate::core::agent;
 use crate::core::capture;
 use crate::core::edit::{self, TipEdit};
+use crate::core::prompt::title_from_prompt;
 use crate::core::template;
 use crate::core::timeparse::format_dt;
-use crate::core::tip::{slugify, FrontMatter, Tip};
+use crate::core::tip::{slugify, FrontMatter, Kind, Tip, TipError};
 use crate::sync::folder::{FolderError, FolderStore};
 use crate::sync::meta;
 use crate::sync::weather::{self, Weather};
@@ -238,6 +239,9 @@ pub fn open_agent_results(state: State<'_, AppState>, id: String) -> Result<(), 
 }
 
 fn agent_results_path(store: &FolderStore, tip: &Tip) -> Result<PathBuf, String> {
+    if tip.is_question() {
+        return Err("a question tip is not an agent task and has no results folder".into());
+    }
     let results = tip
         .front
         .agent
@@ -325,11 +329,27 @@ pub async fn create_tip(
     let zh = state.settings().language == Language::Zh;
     let stem = file_stem(created_at, &front.title);
     let saved = save_new(&app, &state, &stem, "capture", |path| {
-        template::render(path, front.clone(), zh, true).map_err(|e| e.to_string())
+        render_capture(path, front.clone(), zh).map_err(|e| e.to_string())
     })
     .await?;
     spawn_enrich(&app, &saved);
     Ok(state.snapshot())
+}
+
+/// File text for a quick capture. An agent tip's text is its prompt: it
+/// becomes the whole body, and the title is derived from it (a short prompt
+/// is its own title). Every other kind gets the example body.
+fn render_capture(path: &str, front: FrontMatter, zh: bool) -> Result<(Tip, String), TipError> {
+    if front.kind != Kind::Agent {
+        return template::render(path, front, zh, true);
+    }
+    let prompt = front.title.clone();
+    let title = title_from_prompt(&prompt).unwrap_or_else(|| prompt.clone());
+    let body = format!(
+        "{prompt}
+"
+    );
+    template::render_with_body(path, FrontMatter { title, ..front }, &body, zh, true)
 }
 
 /// A new tip with an arXiv id or DOI fetches its paper in the background.
@@ -656,7 +676,6 @@ fn mime_for(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tip::Kind;
 
     #[test]
     fn image_paths_are_folder_relative() {
@@ -857,13 +876,41 @@ mod tests {
             .unwrap()
             .and_hms_opt(8, 0, 0)
             .unwrap();
-        let front = capture::parse("Survey hairpin AC loss papers >agent", at).unwrap();
+        let line = "Survey hairpin AC loss papers from 2020 on, with a table of measured vs. FE results #lit !high >agent";
+        let front = capture::parse(line, at).unwrap();
         assert_eq!(front.kind, Kind::Agent);
-        let (tip, text) = template::render("survey.md", front, false, true).unwrap();
-        assert!(!text.contains("\nagent:"), "{text}");
+        let (tip, text) = render_capture("survey.md", front, false).unwrap();
+        // The whole prompt is the body; the title is derived from it.
+        let prompt =
+            "Survey hairpin AC loss papers from 2020 on, with a table of measured vs. FE results";
+        assert_eq!(tip.body.trim(), prompt);
+        assert_eq!(
+            tip.front.title,
+            "Survey hairpin AC loss papers from 2020 on, with a table of…"
+        );
+        assert_eq!(tip.front.tags, vec!["lit"]);
+        assert_eq!(tip.front.priority, crate::core::tip::Priority::High);
+        assert!(
+            !text.contains(
+                "
+agent:"
+            ),
+            "{text}"
+        );
         assert!(!text.contains("## Checklist"), "{text}");
-        assert_eq!(tip.body.trim(), "");
         assert_eq!(tip.agent_state, Some(AgentState::Queued));
+        // A short prompt is its own title.
+        let short = capture::parse(">agent Find three papers", at).unwrap();
+        let (tip, _) = render_capture("p.md", short, true).unwrap();
+        assert_eq!(tip.front.title, "Find three papers");
+        assert_eq!(tip.body.trim(), "Find three papers");
+        // Other kinds are written as before: the example body.
+        let task = capture::parse("Buy coolant", at).unwrap();
+        let (tip, text) = render_capture("t.md", task.clone(), false).unwrap();
+        assert_eq!(
+            (tip, text),
+            template::render("t.md", task, false, true).unwrap()
+        );
     }
 
     #[test]
@@ -911,6 +958,41 @@ title: A
             capture_name(&state, &store, "note", Some("note-2.md")),
             "note-3.md"
         );
+    }
+
+    #[test]
+    fn new_tips_go_to_the_main_folder_even_beside_a_question_of_that_name() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let state = AppState::load(super::super::storage::Storage::new(
+            data.path().to_path_buf(),
+        ));
+        let store = FolderStore::open(folder.path()).unwrap();
+        std::fs::create_dir(folder.path().join("questions")).unwrap();
+        std::fs::write(folder.path().join("questions").join("note.md"), "x").unwrap();
+        let question = Tip::parse(
+            "questions/note.md",
+            Some("1".into()),
+            "---\ntitle: Q\n---\n",
+        )
+        .unwrap();
+        state.update_board(|b| b.upsert(question));
+        // A plain name in the main folder: never `questions/...`, and the
+        // question of the same stem does not take the name.
+        assert_eq!(capture_name(&state, &store, "note", None), "note.md");
+    }
+
+    #[test]
+    fn question_tips_have_no_agent_results_to_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FolderStore::open(dir.path()).unwrap();
+        std::fs::create_dir_all(dir.path().join("agent").join("survey")).unwrap();
+        let text = "---\ntitle: S\nkind: agent\nagent:\n  results: agent/survey/\n---\n";
+        let main = Tip::parse("survey.md", None, text).unwrap();
+        assert!(agent_results_path(&store, &main).is_ok());
+        let question = Tip::parse("questions/survey.md", None, text).unwrap();
+        let err = agent_results_path(&store, &question).unwrap_err();
+        assert!(err.contains("question"), "{err}");
     }
 
     #[test]

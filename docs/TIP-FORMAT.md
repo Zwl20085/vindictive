@@ -115,7 +115,7 @@ paper:
 A tip created from the capture bar or the "+" tile starts as a template:
 the keys you typed, a commented reference of every optional key, and an
 example body (checklist, figure, links); an agent tip gets no example
-body. Edit or delete what you do not need. The comments last until the app rewrites the file (Done, snooze, or
+body: the captured text is its body (see *Agent tips*). Edit or delete what you do not need. The comments last until the app rewrites the file (Done, snooze, or
 when the file is modified); by then they have done their job.
 
 A tip created with the full new-tip form gets no commented reference (the
@@ -217,7 +217,7 @@ Survey recent papers on AC copper loss in hairpin windings.
   an existing folder under `agent/` in the tips folder (relative, no `..`);
   anything else, including a file, is refused.
   The results subfolder is not a tip: the board only lists `*.md` directly in
-  the tips folder.
+  the tips folder and in `questions/` (see *Question tips*).
 - **Toasts**: when a scan sees an agent tip turn ⭐ or ❓ (written by the
   runner, possibly on another PC), the board raises a toast, gated by the
   same "Toast when a new tip arrives" setting. Not on the first scan after
@@ -230,6 +230,120 @@ Survey recent papers on AC copper loss in hairpin windings.
 - A new agent tip, from the capture bar (`>agent`) or the new-tip form, has
   no `agent` map and no example body or skeleton: the body is the agent's
   prompt, so it holds only what you typed.
+- **Only the prompt is needed.** In the new-tip form (and the Edit form),
+  choosing the kind *Agent* puts one large **Prompt** field right after kind
+  and priority, with the hint that Claude Graph runs it at its next scan and
+  writes the result back into the tip. The title becomes optional. Due date,
+  time, location, tags, reminders, repeat, links and figures mean nothing to
+  the runner, so they are folded away; **Show all fields** brings them
+  back. A field that holds a value is never folded, so nothing is saved
+  unseen, and switching the kind away and back keeps everything typed.
+  Priority, colour, size and highlight words stay: they shape the tile.
+- **Derived title.** With the title left empty, it is taken from the
+  prompt: the first line with text, skipping horizontal rules, whole HTML
+  comments (also multi-line) and whole runner blocks (`<!-- agent:begin -->`
+  to `<!-- agent:end -->`), so it never comes from a comment or a runner
+  heading. Markdown markers are removed (`#`, `>`, `-`/`*`/`+` and
+  `1.`-style list markers with ASCII digits, task boxes, `**`, `__`, `~~`,
+  backticks; links and images keep their text) and a BOM is ignored. Longer
+  than 60 characters, it is cut at a word boundary (or at 60), never in the
+  middle of an accented letter or emoji, and `…` is added. A title you type
+  wins. The
+  body is the prompt exactly as typed; nothing is added to it.
+- **Quick capture** `>agent <text>`: the text (without the `#tag`, `!high`,
+  `@date` and other tokens, which apply as usual) becomes the whole body,
+  and the title is derived from it as above. A short prompt is therefore
+  both the title and the body; the runner gives the agent the title and
+  the body, so the agent sees it twice, which is harmless. In the add bar,
+  Ctrl+Enter opens the form with the text in the Prompt field.
+
+  ```markdown
+  ---
+  title: Survey hairpin AC loss papers from 2020 on, with a table of…
+  kind: agent
+  priority: high
+  status: open
+  tags:
+  - lit
+  created: 2026-11-10 09:30
+  # ---- optional keys (remove the # to use one) ----
+  # due: 2026-10-15 17:00            # a bare date means 23:59
+  # ... (the other commented keys)
+  ---
+
+  Survey hairpin AC loss papers from 2020 on, with a table of measured vs. FE results
+  ```
+
+  from `Survey hairpin AC loss papers from 2020 on, with a table of
+  measured vs. FE results #lit !high >agent`.
+
+## Question tips
+
+A Claude session that needs decisions from you writes them as a tip in the
+`questions/` subfolder of the tips folder; you answer from any device. The
+board reads `*.md` files directly in `questions/` (one level: deeper
+folders are not read; hidden, `~` and temp files are skipped as in the main
+folder) and shows them with a ❓ badge, `md` size by default while open
+(a `size:` in the file wins). The
+strip menu's **Questions only** shows just them, until you pick it again.
+
+- **It is a normal tip.** Same frontmatter, same body; only where the file
+  lives makes it a question. Nothing is written into the file to mark it.
+- **Answer** by editing the text, in the Edit form or your editor: change
+  `- [ ]` to `- [x]` for the option you pick, or type after `Answer:`;
+  then press **Done**. The checkboxes in the detail view are only a
+  display and cannot be clicked. Every board action saves back into
+  `questions/`.
+- **Never an agent task.** `kind: agent` there shows as a plain question,
+  with no agent state, toast or results button, and the Edit form shows it
+  like any tip (no Prompt layout, title required; the kind is kept as
+  written): the runner only scans the top level. To hand a question to the agent, move the file to the top
+  level.
+- **Identity.** Its id is `questions/<file name without .md>`, so
+  `questions/plan.md` and `plan.md` are two different tips. OneDrive
+  conflict copies in `questions/` are flagged against the original in
+  `questions/`, as in the main folder.
+- **The folder** is optional: when it is missing the board shows the main
+  folder as before, and it never creates it. If `questions/` (or the main
+  folder) suddenly lists no files while the board has tips there, the
+  board waits for a second scan that agrees before removing them, so a
+  folder that blinks out during a sync does not wipe its tiles. If
+  `questions/` cannot be read, the sync dot says so and its tips stay. A `questions` that is a link
+  or junction is not followed. New tips from the board always go to the
+  main folder. Image paths are still relative to the tips folder, not to
+  `questions/`.
+- Boards up to 0.6.0 do not see the folder at all.
+
+What a session should write, e.g. `questions/2026-11-10-fe-mesh.md`:
+
+```markdown
+---
+title: "FE model: two mesh choices to confirm"
+kind: note
+created: 2026-11-10 09:30
+---
+
+Context in one or two lines: what the session is doing and why it asks.
+
+## 1. Air-gap mesh layers
+
+- [ ] 3 layers (faster)
+- [ ] 5 layers (smoother torque)
+
+Answer:
+
+## 2. Skin-depth elements in the hairpins
+
+- [ ] 2 per skin depth
+- [ ] 3 per skin depth
+
+Answer:
+```
+
+One `##` heading per question, the options as task-list lines (`- [ ]`,
+which the owner turns into `- [x]` by editing), and an `Answer:` line for
+free text. A session reads the answers back from the
+file once its `status` is `done` (or earlier, if it polls the body).
 
 ## Time semantics
 

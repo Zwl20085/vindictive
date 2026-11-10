@@ -6,6 +6,7 @@
 
 use serde::Deserialize;
 
+use super::prompt::title_from_prompt;
 use super::recur;
 use super::timeparse::{is_offset, parse_datetime, parse_due, parse_offset};
 use super::tip::{FrontMatter, Kind, Priority, Tip};
@@ -68,17 +69,14 @@ pub struct TipEdit {
 /// Validate `edit` and return the edited copy of `tip`. The file path, and
 /// so the id, never changes: renaming the title keeps the file name.
 pub fn apply(tip: &Tip, edit: TipEdit) -> Result<Tip, String> {
-    let title = edit.title.trim().to_string();
-    if title.is_empty() {
-        return Err("a tip needs a title".into());
-    }
+    let body = edit.body.replace("\r\n", "\n");
+    check_len("text", &body, MAX_BODY_CHARS)?;
+    let title = title_for(edit.title.trim(), edit.kind, tip.is_question(), &body)?;
     check_len("title", &title, MAX_TITLE_CHARS)?;
     let location = optional(edit.location.as_deref());
     if let Some(l) = &location {
         check_len("location", l, MAX_LOCATION_CHARS)?;
     }
-    let body = edit.body.replace("\r\n", "\n");
-    check_len("text", &body, MAX_BODY_CHARS)?;
     let old = &tip.front;
     let due = due(tip, edit.due.as_deref())?;
     let has_due = due.as_deref().and_then(parse_due).is_some();
@@ -99,6 +97,18 @@ pub fn apply(tip: &Tip, edit: TipEdit) -> Result<Tip, String> {
         ..old.clone()
     };
     Ok(Tip::from_parts(&tip.path, tip.sha.clone(), front, body))
+}
+
+/// The title as typed; for an agent tip left without one, derived from the
+/// prompt (`core::prompt`), so the prompt alone is enough. A question tip is
+/// never an agent task, so it always needs a title, whatever its kind.
+fn title_for(typed: &str, kind: Kind, question: bool, body: &str) -> Result<String, String> {
+    match (typed.is_empty(), kind) {
+        (false, _) => Ok(typed.to_string()),
+        (true, Kind::Agent) if !question => title_from_prompt(body)
+            .ok_or_else(|| "an agent tip needs a prompt (or a title)".to_string()),
+        (true, _) => Err("a tip needs a title".into()),
+    }
 }
 
 fn check_len(what: &str, value: &str, max: usize) -> Result<(), String> {
@@ -767,5 +777,98 @@ mod tests {
             r#"{"title":"T","kind":"chore","priority":"low"}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn agent_tips_take_their_title_from_the_prompt_when_left_blank() {
+        let prompt = "## Survey **hairpin** AC loss
+
+Find three recent papers.
+";
+        let edited = apply(
+            &tip(),
+            TipEdit {
+                title: "  ".into(),
+                kind: Kind::Agent,
+                body: prompt.into(),
+                ..edit()
+            },
+        )
+        .unwrap();
+        assert_eq!(edited.front.title, "Survey hairpin AC loss");
+        // The body is the prompt as typed (line ends unified, nothing added).
+        assert_eq!(
+            edited.body,
+            "## Survey **hairpin** AC loss
+
+Find three recent papers.
+"
+        );
+        // A title the user typed wins.
+        let named = apply(
+            &tip(),
+            TipEdit {
+                title: "My survey".into(),
+                kind: Kind::Agent,
+                body: prompt.into(),
+                ..edit()
+            },
+        )
+        .unwrap();
+        assert_eq!(named.front.title, "My survey");
+        // Neither title nor prompt: refused, naming the prompt.
+        let err = apply(
+            &tip(),
+            TipEdit {
+                title: "".into(),
+                kind: Kind::Agent,
+                body: " 
+"
+                .into(),
+                ..edit()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("prompt"), "{err}");
+        // Other kinds still need a title.
+        let err = apply(
+            &tip(),
+            TipEdit {
+                title: "".into(),
+                kind: Kind::Note,
+                body: prompt.into(),
+                ..edit()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("title"), "{err}");
+    }
+
+    #[test]
+    fn a_question_tip_with_kind_agent_still_needs_a_title() {
+        let question = Tip::parse(
+            "questions/q.md",
+            Some("1".into()),
+            "---
+title: Q
+kind: agent
+---
+Answer:
+",
+        )
+        .unwrap();
+        let err = apply(
+            &question,
+            TipEdit {
+                title: " ".into(),
+                kind: Kind::Agent,
+                body: "Answer: fine
+"
+                .into(),
+                ..edit()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("title"), "{err}");
     }
 }

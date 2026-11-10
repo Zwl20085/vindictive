@@ -1,5 +1,6 @@
 import type { Kind, Tip, Urgency } from '../types';
 import { parseNaive } from './time';
+import { displayKind } from './question';
 import { urgencyOf } from './urgency';
 
 export interface TileColor {
@@ -84,6 +85,7 @@ export function tileColor(tip: Tip, now: Date): TileColor {
     return { bg, fg: foregroundFor(bg), overdue: urgency === 'overdue' };
   }
   if (urgency === 'overdue') return { bg: OVERDUE_COLOR, fg: LIGHT_FG, overdue: true };
-  const bg = tip.kind === 'deadline' ? DEADLINE_COLORS[urgency] : KIND_COLORS[tip.kind];
+  const kind = displayKind(tip);
+  const bg = kind === 'deadline' ? DEADLINE_COLORS[urgency] : KIND_COLORS[kind];
   return { bg, fg: foregroundFor(bg), overdue: false };
 }

@@ -10,7 +10,7 @@ import { createBoard, fitTitles, handleBoardKeys, updateBoard } from './board';
 import { renderChrome, updateChrome } from './chrome';
 import { refreshDetail, renderDetail } from './detail';
 import { el, mount } from './dom';
-import { emptyDraft, isEditFormDirty, renderEditForm, showEditFormNotice, tipFromDraft } from './edit-form';
+import { draftFromCapture, emptyDraft, isEditFormDirty, renderEditForm, showEditFormNotice, tipFromDraft } from './edit-form';
 import { errorLine, guard, showError, showNotice } from './errors';
 import { cachedResolver, pruneImageCache } from './images';
 import { closeLightbox, isLightboxOpen } from './lightbox';
@@ -65,7 +65,13 @@ export class App {
     this.store.subscribe((state, previous) => {
       this.renderChrome(state);
       this.renderPanel(state);
-      if (state.board !== previous.board || state.view !== previous.view || state.adding !== previous.adding) this.renderFaces(state);
+      if (
+        state.board !== previous.board ||
+        state.view !== previous.view ||
+        state.adding !== previous.adding ||
+        state.questionsOnly !== previous.questionsOnly
+      )
+        this.renderFaces(state);
     });
     document.addEventListener('keydown', (e) => this.onKey(e));
     await onBoardUpdated((board) => this.applyBoard(board)).catch((e) => showError('event subscription', e));
@@ -189,7 +195,8 @@ export class App {
     if (view.kind === 'board' && !typing) {
       if ((event.key === 'n' || event.key === '+' || event.key === 'Insert') && !adding) {
         event.preventDefault();
-        this.store.set({ adding: true });
+        // A new tip never belongs to the questions filter: show the board.
+        this.store.set({ adding: true, questionsOnly: false });
         return;
       }
       const grid = this.front.querySelector<HTMLElement>('.board');
@@ -213,7 +220,7 @@ export class App {
     const slot = this.root.querySelector('.chrome-slot');
     if (!slot) return;
     const language = state.board?.settings.language ?? 'en';
-    const options = { state: state.board, sync: state.sync, actions: this.chromeActions() };
+    const options = { state: state.board, sync: state.sync, actions: this.chromeActions(), questionsOnly: state.questionsOnly };
     const strip = slot.querySelector<HTMLElement>(':scope > .chrome');
     if (strip && strip.dataset.lang === language) {
       updateChrome(strip, options);
@@ -271,9 +278,10 @@ export class App {
       resolveImage: this.resolveImage,
       onOpen: (id) => this.store.set({ view: { kind: 'detail', id } }),
       onMenu: (id, x, y) => this.tileMenu(id, x, y),
-      onAdd: () => this.store.set({ adding: true }),
+      onAdd: () => this.store.set({ adding: true, questionsOnly: false }),
       onSetup: () => this.store.set({ view: { kind: 'settings' } }),
       onReorder: (id, order) => void this.mutate(() => call('set_order', { id, order }), 'set_order'),
+      questionsOnly: state.questionsOnly,
     });
     const wanted = bar ? [bar, grid] : [grid];
     for (const child of Array.from(this.front.children)) {
@@ -466,7 +474,7 @@ export class App {
 
   /** The full form for a new tip, prefilled from the add bar's text. */
   private expand(text: string): void {
-    this.store.set({ view: { kind: 'create', draft: { ...emptyDraft(), ...parseCapture(text) } } });
+    this.store.set({ view: { kind: 'create', draft: draftFromCapture({ ...emptyDraft(), ...parseCapture(text) }) } });
   }
 
   private createActions() {
@@ -477,7 +485,8 @@ export class App {
         const before = new Set(this.store.get().board?.tips.map((t) => t.id));
         this.applyBoard(await call('create_tip_full', { edit }));
         const tips = this.store.get().board?.tips ?? [];
-        const created = tips.find((t) => !before.has(t.id) && t.title === edit.title) ?? tips.find((t) => t.title === edit.title);
+        const fresh = tips.filter((t) => !before.has(t.id));
+        const created = fresh.find((t) => t.title === edit.title) ?? fresh[0] ?? tips.find((t) => t.title === edit.title);
         this.store.set({ view: { kind: 'board' }, adding: false });
         if (created) this.focusTile(created.id);
       },
@@ -559,6 +568,7 @@ export class App {
         const s = this.store.get().board?.settings;
         if (s) void this.saveSettings({ ...s, show_done: !s.show_done });
       },
+      onToggleQuestions: () => this.store.set({ questionsOnly: !this.store.get().questionsOnly }),
       onDock: (dock: Dock) => {
         // save_settings applies the dock on the backend: one call, one emit.
         const s = this.store.get().board?.settings;

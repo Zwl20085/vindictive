@@ -9,6 +9,43 @@ conventional-commit history; the version a commit shipped in is the first
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-10
+
+### Added
+
+- Question tips: the board also reads `*.md` files directly in the
+  `questions/` subfolder of the tips folder, where a Claude session leaves
+  questions for you to answer from any device. Such a tile carries a ❓
+  badge (read out as "Question") and is `md` by default while open (an
+  explicit `size:` wins); the strip menu's
+  "Questions only" shows just them. Open, edit, Done and delete work as for
+  any tip and write back into `questions/`. A question tip is never an
+  agent task, even with `kind: agent`. Its id is `questions/<name>`, so it
+  never collides with a main tip of the same file name; `kind: agent` there
+  keeps the normal Edit form layout and needs a title. A missing
+  `questions/` folder is normal; the board never creates it, and new tips
+  still go to the main folder. Boards up to 0.6.0 do not see the folder.
+  A `questions/` that cannot be read is reported in the sync dot and its
+  tips stay on the board; the main folder still refreshes. The main folder
+  and `questions/` each wait for a second scan before an emptied folder
+  removes its tips, even while the other one still lists files.
+- Agent tips need only the prompt: choosing *Agent* in the new-tip or Edit
+  form shows one large Prompt field with a hint, folds away the fields an
+  agent task does not use (due, location, tags, reminders, repeat, links,
+  figures; "Show all fields" brings them back, and a field with a value is
+  never folded), and makes the title optional: left empty, it is derived
+  from the first line of the prompt (Markdown markers removed, at most 60
+  characters at a word boundary, then `…`). The body is the prompt as typed.
+
+### Changed
+
+- Quick capture `>agent <text>` now makes the text the body (the agent's
+  prompt) and derives the title from it, instead of a title with an empty
+  body. A short prompt is therefore both the title and the body (the agent
+  is given both); this is intended. Ctrl+Enter in the add bar opens the form with the text as the prompt.
+- The add shortcut (`n`, `+`, Insert) clears the "Questions only" filter, so
+  the new tip is not hidden.
+
 ## [0.6.0] - 2026-11-09
 
 ### Added
@@ -261,7 +298,8 @@ plugin version mismatch. 0.5.1 is the same code plus that fix.
 
 - First release: an always-on-top tile board synced with GitHub.
 
-[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Zwl20085/vindictive/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/Zwl20085/vindictive/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Zwl20085/vindictive/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/Zwl20085/vindictive/compare/v0.5.1...v0.5.3
 [0.5.1]: https://github.com/Zwl20085/vindictive/compare/v0.4.0...v0.5.1

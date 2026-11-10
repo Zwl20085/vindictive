@@ -22,6 +22,8 @@ export interface UiState {
   weatherStatus: WeatherStatus;
   /** The inline "new tip" bar is open. */
   adding: boolean;
+  /** The board shows only question tips (`questions/`). Not saved. */
+  questionsOnly: boolean;
 }
 
 type Subscriber = (state: UiState, previous: UiState) => void;
@@ -30,7 +32,7 @@ export class Store {
   private state: UiState;
   private readonly subscribers = new Set<Subscriber>();
 
-  constructor(initial: UiState = { view: { kind: 'board' }, sync: 'idle', weatherStatus: 'off', adding: false }) {
+  constructor(initial: UiState = { view: { kind: 'board' }, sync: 'idle', weatherStatus: 'off', adding: false, questionsOnly: false }) {
     this.state = initial;
   }
 

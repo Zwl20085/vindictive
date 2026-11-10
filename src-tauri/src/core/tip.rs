@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::agent::{self, Agent, AgentState};
 use super::frontmatter::{join, split, FrontmatterError};
+use super::question::{id_for_path, is_question_path};
 use super::timeparse::{format_dt, is_offset, parse_due, parse_remind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
@@ -297,7 +298,8 @@ pub struct FrontMatter {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(into = "TipJson", from = "TipJson")]
 pub struct Tip {
-    /// Stable identifier: the file name without `.md`.
+    /// Stable identifier: the file name without `.md`; for a question tip
+    /// (`questions/<name>.md`) `questions/<name>`, see `core::question`.
     pub id: String,
     /// Path relative to the tips folder, e.g. `2026-10-01-camera-ready.md`.
     pub path: String,
@@ -413,7 +415,7 @@ impl From<TipJson> for Tip {
         front.extra.extend(json.shadowed);
         let (agent, exact) = agent_from_json(json.agent_yaml.as_deref(), json.agent);
         front.agent = agent;
-        let agent_state = agent_state_of(&front, &json.body);
+        let agent_state = agent_state_of(&front, &json.body, &json.path);
         Tip {
             id: json.id,
             path: json.path,
@@ -462,7 +464,7 @@ impl Tip {
     }
 
     pub fn from_parts(path: &str, sha: Option<String>, front: FrontMatter, body: String) -> Tip {
-        let id = id_from_path(path);
+        let id = id_for_path(path);
         let mut warnings = Vec::new();
         let mut resolve = |key: &str, raw: Option<&str>| {
             let parsed = raw.and_then(parse_due);
@@ -491,7 +493,7 @@ impl Tip {
                 warnings.push(format!("repeat: cannot parse {rule:?}"));
             }
         }
-        let agent_state = agent_state_of(&front, &body);
+        let agent_state = agent_state_of(&front, &body, path);
         Tip {
             id,
             path: path.to_string(),
@@ -515,6 +517,12 @@ impl Tip {
     /// Return a copy with a new frontmatter. Derived timestamps are recomputed.
     pub fn with_front(&self, front: FrontMatter) -> Tip {
         Tip::from_parts(&self.path, self.sha.clone(), front, self.body.clone())
+    }
+
+    /// A question tip: its file is in the `questions/` subfolder. Derived
+    /// from the path, never stored.
+    pub fn is_question(&self) -> bool {
+        is_question_path(&self.path)
     }
 
     pub fn is_open(&self) -> bool {
@@ -607,13 +615,13 @@ fn agent_from_json(yaml: Option<&str>, old: Option<serde_json::Value>) -> (Optio
     }
 }
 
-fn agent_state_of(front: &FrontMatter, body: &str) -> Option<AgentState> {
+/// The agent badge state. A question tip never has one, whatever its kind:
+/// the runner only scans the top level of the tips folder.
+fn agent_state_of(front: &FrontMatter, body: &str, path: &str) -> Option<AgentState> {
+    if is_question_path(path) {
+        return None;
+    }
     agent::display_state(front.kind == Kind::Agent, front.agent.as_ref(), body)
-}
-
-pub fn id_from_path(path: &str) -> String {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name.strip_suffix(".md").unwrap_or(name).to_string()
 }
 
 const MAX_SLUG_BYTES: usize = 48;
@@ -1441,5 +1449,44 @@ highlight: 2024
         let clean = Tip::parse("x.md", None, SAMPLE).unwrap();
         assert!(clean.warnings.is_empty());
         assert!(!serde_json::to_string(&clean).unwrap().contains("warnings"));
+    }
+
+    #[test]
+    fn question_tips_are_identified_by_their_folder() {
+        let main = Tip::parse("survey.md", None, SAMPLE).unwrap();
+        let question = Tip::parse("questions/survey.md", None, SAMPLE).unwrap();
+        assert_eq!(main.id, "survey");
+        assert_eq!(question.id, "questions/survey");
+        assert!(!main.is_question());
+        assert!(question.is_question());
+        // Derived from the path only: nothing is written into the file.
+        let md = question.to_markdown().unwrap();
+        assert!(!md.contains("question"), "{md}");
+        // No new JSON key either, so caches stay what older boards expect.
+        let json = serde_json::to_value(&question).unwrap();
+        assert_eq!(json["id"], "questions/survey");
+        assert_eq!(json["path"], "questions/survey.md");
+        assert!(json.get("question").is_none(), "{json}");
+    }
+
+    #[test]
+    fn a_question_tip_is_never_an_agent_task() {
+        let text = agent_file(AGENT_BLOCK);
+        let main = Tip::parse("survey.md", Some("s1".into()), &text).unwrap();
+        assert_eq!(main.agent_state, Some(AgentState::Question));
+        let question = Tip::parse("questions/survey.md", Some("s1".into()), &text).unwrap();
+        assert_eq!(question.front.kind, Kind::Agent, "the file keeps its kind");
+        assert!(question.front.agent.is_some(), "and its agent map");
+        assert_eq!(question.agent_state, None);
+        // Through the cache, and through every board write, it stays so.
+        let json = serde_json::to_string(&question).unwrap();
+        assert!(!json.contains("agent_state"), "{json}");
+        let cached: Tip = serde_json::from_str(&json).unwrap();
+        assert_eq!(cached, question);
+        for (name, written) in board_writes(&question) {
+            assert_eq!(written.agent_state, None, "{name}");
+            assert_eq!(written.path, "questions/survey.md", "{name}");
+            assert_eq!(written.id, "questions/survey", "{name}");
+        }
     }
 }
