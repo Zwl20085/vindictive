@@ -3,6 +3,7 @@ import type { Tip, TipEdit } from '../types';
 import { setLocale } from '../lib/i18n';
 import {
   DISCARD_CONFIRM_MS,
+  draftFromCapture,
   dueFields,
   emptyDraft,
   isEditFormDirty,
@@ -454,5 +455,147 @@ describe('agent tips in the form', () => {
     field<HTMLSelectElement>('kind').value = 'agent';
     field<HTMLTextAreaElement>('body').value = 'Find three recent papers.';
     expect(readEditForm(form)).toEqual({ ...emptyDraft(), title: 'Survey papers', kind: 'agent', body: 'Find three recent papers.' });
+  });
+});
+
+describe('agent kind in the form', () => {
+  const agentDraftTip = (patch: Partial<TipEdit> = {}): Tip => tipFromDraft({ ...emptyDraft(), kind: 'agent', ...patch });
+  const wrapper = (form: HTMLFormElement, name: string): HTMLElement => {
+    const input = form.querySelector<HTMLElement>(`[name="${name}"]`);
+    const node = input?.closest<HTMLElement>('.set-nonagent') ?? input?.closest<HTMLElement>('.set-field');
+    if (!node) throw new Error(`no wrapper for ${name}`);
+    return node;
+  };
+  const hiddenNames = ['due_date', 'location', 'tags', 'remind', 'repeat', 'links', 'images'];
+  const keptNames = ['title', 'kind', 'priority', 'color', 'size', 'highlight', 'body'];
+  const create = (tip: Tip) => setup(tip, vi.fn(async () => undefined), 'create');
+
+  it('shows the prompt field with its hint and folds away what an agent task does not use', () => {
+    const { form, field } = create(agentDraftTip());
+    for (const name of hiddenNames) expect(wrapper(form, name).hidden, name).toBe(true);
+    for (const name of keptNames) expect(wrapper(form, name).hidden, name).toBe(false);
+    const body = field<HTMLTextAreaElement>('body');
+    expect(wrapper(form, 'body').querySelector('.set-label')?.textContent).toBe('Prompt');
+    expect(body.placeholder).toMatch(/task for the agent/);
+    const hint = form.querySelector<HTMLElement>('.edit-agent-hint');
+    expect(hint?.hidden).toBe(false);
+    expect(hint?.textContent).toMatch(/Claude Graph runs it at its next scan and writes the result back into this tip/);
+    expect(body.getAttribute('aria-describedby')).toBe(hint?.id);
+    const title = field<HTMLInputElement>('title');
+    expect(title.required).toBe(false);
+    expect(title.placeholder).toMatch(/taken from the prompt/);
+    // The prompt comes right after kind and priority, before the folded fields.
+    expect(field('kind').compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(body.compareDocumentPosition(field('due_date')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('"Show all fields" brings the folded fields back', () => {
+    const { form } = create(agentDraftTip());
+    const toggle = form.querySelector<HTMLButtonElement>('.edit-show-all');
+    expect(toggle?.hidden).toBe(false);
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    toggle?.click();
+    for (const name of hiddenNames) expect(wrapper(form, name).hidden, name).toBe(false);
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('switching the kind away and back keeps every typed value', () => {
+    const { form, field } = create(tipFromDraft(emptyDraft()));
+    const kind = field<HTMLSelectElement>('kind');
+    expect(form.querySelector<HTMLElement>('.edit-agent-hint')?.hidden).toBe(true);
+    expect(form.querySelector<HTMLElement>('.edit-show-all')?.hidden).toBe(true);
+    expect(wrapper(form, 'body').querySelector('.set-label')?.textContent).toBe('Notes (Markdown)');
+    field<HTMLInputElement>('title').value = 'Typed title';
+    field<HTMLTextAreaElement>('body').value = 'Typed body';
+    field<HTMLInputElement>('location').value = 'Lab 302';
+    kind.value = 'agent';
+    kind.dispatchEvent(new Event('change', { bubbles: true }));
+    // A field holding a value is never hidden, so nothing is saved unseen.
+    expect(wrapper(form, 'location').hidden).toBe(false);
+    expect(wrapper(form, 'due_date').hidden).toBe(true);
+    kind.value = 'task';
+    kind.dispatchEvent(new Event('change', { bubbles: true }));
+    for (const name of hiddenNames) expect(wrapper(form, name).hidden, name).toBe(false);
+    expect(field<HTMLInputElement>('title').value).toBe('Typed title');
+    expect(field<HTMLTextAreaElement>('body').value).toBe('Typed body');
+    expect(field<HTMLInputElement>('location').value).toBe('Lab 302');
+    expect(field<HTMLInputElement>('title').required).toBe(true);
+  });
+
+  it('an existing agent tip keeps every field it has a value for in view', () => {
+    const tip: Tip = { ...base, kind: 'agent', repeat: 'daily' };
+    const { form } = setup(tip);
+    for (const name of ['due_date', 'location', 'tags', 'links', 'repeat']) expect(wrapper(form, name).hidden, name).toBe(false);
+    expect(wrapper(form, 'images').hidden).toBe(true);
+  });
+
+  it('derives the title from the prompt when it is left empty, and keeps the prompt as typed', () => {
+    const prompt = '## Survey **hairpin** AC loss\n\nFind three recent papers.\n';
+    const { form, field } = create(agentDraftTip());
+    field<HTMLTextAreaElement>('body').value = prompt;
+    const edit = readEditForm(form);
+    expect(edit.title).toBe('Survey hairpin AC loss');
+    expect(edit.body).toBe(prompt);
+    field<HTMLInputElement>('title').value = 'My survey';
+    expect(readEditForm(form).title).toBe('My survey');
+    field<HTMLInputElement>('title').value = '';
+    field<HTMLTextAreaElement>('body').value = '  \n';
+    expect(() => readEditForm(form)).toThrow(/prompt/);
+  });
+
+  it('other kinds still need a title', () => {
+    const { form, field } = create(tipFromDraft(emptyDraft()));
+    field<HTMLTextAreaElement>('body').value = 'Some text';
+    expect(() => readEditForm(form)).toThrow(/title/i);
+  });
+
+  it('a capture line expanded to the form puts an agent prompt in the body', () => {
+    expect(draftFromCapture({ ...emptyDraft(), kind: 'agent', title: 'Find three papers' })).toMatchObject({ title: '', body: 'Find three papers' });
+    const task: TipEdit = { ...emptyDraft(), kind: 'task', title: 'Buy coolant' };
+    expect(draftFromCapture(task)).toEqual(task);
+  });
+
+  it('is labelled in Chinese too', () => {
+    setLocale('zh');
+    const { form, field } = create(agentDraftTip());
+    expect(wrapper(form, 'body').querySelector('.set-label')?.textContent).toBe('提示词');
+    expect(field<HTMLTextAreaElement>('body').placeholder).toMatch(/智能体/);
+  });
+});
+
+describe('agent kind in a question tip', () => {
+  const question: Tip = { ...base, id: 'questions/q', path: 'questions/q.md', kind: 'agent', title: 'Pick a mesh', body: 'Answer:\n' };
+  const wrapperOf = (form: HTMLFormElement, name: string): HTMLElement => {
+    const input = form.querySelector<HTMLElement>(`[name="${name}"]`);
+    const node = input?.closest<HTMLElement>('.set-nonagent') ?? input?.closest<HTMLElement>('.set-field');
+    if (!node) throw new Error(`no wrapper for ${name}`);
+    return node;
+  };
+
+  it('uses the normal layout: no runner hint, a required title, every field', () => {
+    const { form, field } = setup(question);
+    expect(form.querySelector<HTMLElement>('.edit-agent-hint')?.hidden).toBe(true);
+    expect(form.querySelector<HTMLElement>('.edit-show-all')?.hidden).toBe(true);
+    expect(wrapperOf(form, 'body').querySelector('.set-label')?.textContent).toBe('Notes (Markdown)');
+    expect(field<HTMLTextAreaElement>('body').placeholder).toBe('');
+    for (const name of ['due_date', 'location', 'tags', 'remind', 'repeat', 'links', 'images']) expect(wrapperOf(form, name).hidden, name).toBe(false);
+    expect(field<HTMLInputElement>('title').required).toBe(true);
+  });
+
+  it('keeps kind agent in the file and still needs a title', () => {
+    const { form, field } = setup(question);
+    expect(readEditForm(form).kind).toBe('agent');
+    field<HTMLInputElement>('title').value = '';
+    expect(() => readEditForm(form)).toThrow(/title/i);
+  });
+});
+
+describe('folding keeps fields with a stored value in view', () => {
+  it('a due the app could not parse stays visible in agent mode', () => {
+    const tip: Tip = { ...base, kind: 'agent', due: 'someday', due_at: undefined, location: undefined, tags: [], links: [] };
+    const { field } = setup(tip);
+    expect(field<HTMLInputElement>('due_date').value).toBe('');
+    expect(field('due_date').closest<HTMLElement>('.set-nonagent')?.hidden).toBe(false);
+    expect(field('location').closest<HTMLElement>('.set-nonagent')?.hidden).toBe(true);
   });
 });

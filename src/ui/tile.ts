@@ -2,6 +2,7 @@ import type { Tip } from '../types';
 import { AGENT_BADGE, agentStateLabel } from '../lib/agent';
 import { locale, t } from '../lib/i18n';
 import { isRelativeSrc } from '../lib/markdown';
+import { displayKind, isQuestion, QUESTION_BADGE } from '../lib/question';
 import { countdown, parseNaive } from '../lib/time';
 import { spanFor, tileSize } from '../lib/tileSize';
 import { tileColor } from '../lib/tileColor';
@@ -52,7 +53,8 @@ function countdownText(tip: Tip, now: Date): string | undefined {
 }
 
 function ariaLabel(tip: Tip, cd: string | undefined, isNextUp: boolean): string {
-  const parts = [labelFor(tip.kind), tip.title];
+  const parts = [labelFor(displayKind(tip)), tip.title];
+  if (isQuestion(tip)) parts.unshift(t('question'));
   if (tip.agent_state) parts.push(agentStateLabel(tip.agent_state));
   if (cd) parts.push(cd);
   if (isNextUp) parts.unshift(t('nextUp'));
@@ -78,15 +80,23 @@ function agentBadge(tip: Tip): HTMLElement | null {
   });
 }
 
+/** The ❓ badge of a question tip, with the word for hover and screen readers. */
+function questionBadge(tip: Tip): HTMLElement | null {
+  if (!isQuestion(tip)) return null;
+  const words = t('question');
+  return el('span', { className: 'tile-question-badge', role: 'img', 'aria-label': words, title: words, text: QUESTION_BADGE });
+}
+
 function topRow(tip: Tip, cd: string | undefined, isNextUp: boolean): HTMLElement {
   return el(
     'span',
     { className: 'tile-top' },
     isNextUp ? el('span', { className: 'tile-next', text: t('next') }) : null,
+    questionBadge(tip),
     agentBadge(tip),
     cd ? el('span', { className: 'tile-countdown', text: cd }) : null,
     warningsOf(tip).length ? el('span', { className: 'tile-warn', 'aria-hidden': 'true', text: '!' }) : null,
-    el('span', { className: 'tile-glyph', 'aria-hidden': 'true', text: KIND_GLYPH[tip.kind] }),
+    el('span', { className: 'tile-glyph', 'aria-hidden': 'true', text: KIND_GLYPH[displayKind(tip)] }),
   );
 }
 
@@ -177,6 +187,7 @@ export function renderTile(options: TileOptions): HTMLButtonElement {
   if (colour.overdue) classes.push('tile-overdue');
   if (tip.status === 'done') classes.push('tile-done');
   if (tip.agent_state) classes.push(`tile-agent-${tip.agent_state}`);
+  if (isQuestion(tip)) classes.push('tile-question');
   if (enterIndex !== undefined) classes.push('tile-enter');
 
   const button = el(

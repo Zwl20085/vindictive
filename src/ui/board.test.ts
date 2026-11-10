@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SAMPLE_SETTINGS } from '../mock/sample-tips';
 import type { BoardState, Tip } from '../types';
-import { createBoard, handleBoardKeys, renderBoard, updateBoard, type BoardOptions } from './board';
+import { createBoard, handleBoardKeys, renderBoard, updateBoard, visibleTips, type BoardOptions } from './board';
 
 const NOW = new Date('2026-11-04T10:00:00');
 
@@ -327,5 +327,39 @@ describe('drag and drop', () => {
     handleBoardKeys(grid, new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, cancelable: true }));
     // b c a -> b a c: between b (1) and c (2).
     expect(onReorder).toHaveBeenLastCalledWith('a', 1.5);
+  });
+});
+
+describe('questions filter', () => {
+  const q = (id: string, extra: Partial<Tip> = {}): Tip => tip(`questions/${id}`, { path: `questions/${id}.md`, ...extra });
+
+  it('shows every tip without the filter and only question tips with it', () => {
+    const state = board([tip('a'), q('a'), tip('b'), q('c', { status: 'done' })]);
+    expect(visibleTips(state, NOW).map((t) => t.id)).toEqual(['a', 'questions/a', 'b']);
+    expect(visibleTips(state, NOW, true).map((t) => t.id)).toEqual(['questions/a']);
+    const withDone = board(state.tips, { settings: { ...state.settings, show_done: true } });
+    expect(visibleTips(withDone, NOW, true).map((t) => t.id)).toEqual(['questions/a', 'questions/c']);
+  });
+
+  it('a question and a main tip of the same name are two tiles', () => {
+    const grid = createBoard();
+    updateBoard(grid, options(board([tip('a'), q('a')])));
+    expect(ids(grid)).toEqual(['a', 'questions/a']);
+  });
+
+  it('offers no "+" tile and no reordering while filtered, and says when there is nothing', () => {
+    const grid = createBoard();
+    const onReorder = vi.fn();
+    updateBoard(grid, options(board([tip('a'), q('b')]), { onAdd: vi.fn(), onReorder, questionsOnly: true }));
+    expect(ids(grid)).toEqual(['questions/b']);
+    expect(grid.querySelector('.tile-add')).toBeNull();
+    document.body.append(grid);
+    const only = tileFor(grid, 'questions/b');
+    only.focus();
+    handleBoardKeys(grid, new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true }));
+    expect(onReorder).not.toHaveBeenCalled();
+    updateBoard(grid, options(board([tip('a')]), { onAdd: vi.fn(), questionsOnly: true }));
+    expect(grid.querySelector('.tile-add')).toBeNull();
+    expect(grid.querySelector('.board-empty')?.textContent).toBe('No questions waiting for an answer.');
   });
 });

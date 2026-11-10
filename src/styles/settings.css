@@ -255,3 +255,19 @@
 .set-color-picker[data-empty='true']::-webkit-color-swatch {
   opacity: 0;
 }
+
+/* Edit form, agent kind: folded fields stay in the form (their values are
+   kept) but out of sight; author display rules must not bring them back. */
+.edit-form [hidden] {
+  display: none !important;
+}
+
+.edit-body-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.edit-show-all {
+  align-self: flex-start;
+}

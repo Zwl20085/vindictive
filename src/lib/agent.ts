@@ -5,6 +5,7 @@
  */
 import type { AgentState, Tip } from '../types';
 import { t, type StringKey } from './i18n';
+import { isQuestion } from './question';
 
 /** Badge per display state (protocol section 5). */
 export const AGENT_BADGE: Record<AgentState, string> = {
@@ -143,8 +144,9 @@ export function displayState(tip: Pick<Tip, 'kind' | 'agent'>, hash: string): Ag
   return 'queued';
 }
 
-/** The tip with `agent_state` derived from its kind, `agent` map and body. */
+/** The tip with `agent_state` derived from its kind, `agent` map and body.
+ *  A question tip never has one: it is not an agent task. */
 export function withAgentState<T extends Tip>(tip: T): T {
-  const state = tip.kind === 'agent' ? displayState(tip, bodyHash(tip.body)) : undefined;
+  const state = tip.kind === 'agent' && !isQuestion(tip) ? displayState(tip, bodyHash(tip.body)) : undefined;
   return { ...tip, agent_state: state };
 }

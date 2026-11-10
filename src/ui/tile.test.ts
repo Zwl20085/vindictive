@@ -53,3 +53,32 @@ describe('agent tile badge', () => {
     expect(render(tip({ agent: { v: 2 } })).querySelector('.tile-agent-badge')).toBeNull();
   });
 });
+
+describe('question tile', () => {
+  const question = (over: Partial<Tip> = {}): Tip => tip({ id: 'questions/mesh', path: 'questions/mesh.md', title: 'Pick a mesh', kind: 'note', ...over });
+
+  it('shows ❓ with the word for screen readers and hover', () => {
+    const tile = render(question());
+    const badge = tile.querySelector('.tile-top .tile-question-badge');
+    expect(badge?.textContent).toBe('❓');
+    expect(badge?.getAttribute('role')).toBe('img');
+    expect(badge?.getAttribute('aria-label')).toBe('Question');
+    expect(badge?.getAttribute('title')).toBe('Question');
+    expect(tile.classList.contains('tile-question')).toBe(true);
+    expect(tile.getAttribute('aria-label')).toMatch(/^Question, /);
+    expect(tile.dataset.id).toBe('questions/mesh');
+  });
+
+  it('kind agent shows as a plain question: no agent badge, glyph or label', () => {
+    const tile = render(question({ kind: 'agent', agent: { v: 1, state: 'question' } }));
+    expect(tile.querySelector('.tile-agent-badge')).toBeNull();
+    expect(Array.from(tile.classList).some((c) => c.startsWith('tile-agent-'))).toBe(false);
+    expect(tile.querySelector('.tile-glyph')?.textContent).toBe('≡');
+    expect(tile.getAttribute('aria-label')).not.toContain('Agent');
+    expect(tile.querySelector('.tile-question-badge')).not.toBeNull();
+  });
+
+  it('main tips have no question badge', () => {
+    expect(render(tip({ kind: 'note' })).querySelector('.tile-question-badge')).toBeNull();
+  });
+});

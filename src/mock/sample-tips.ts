@@ -180,6 +180,18 @@ export function sampleTips(now: Date): Tip[] {
         'Find three recent papers on hairpin AC loss.\n\n<!-- agent:begin 2026-11-09T19:31:00 done -->\n## ⭐ Result · 2026-11-09 19:31\nFound 14 papers; the summary table is in `survey.md`.\n<!-- agent:end -->\n',
     },
     {
+      // A question tip: lives in `questions/`, so its id carries the folder.
+      id: 'questions/2026-11-10-fe-mesh-choices',
+      path: 'questions/2026-11-10-fe-mesh-choices.md',
+      title: 'FE model: two mesh choices to confirm',
+      kind: 'note',
+      priority: 'normal',
+      status: 'open',
+      remind_at: [],
+      body:
+        '## 1. Air-gap mesh layers\n\n- [ ] 3 layers (faster)\n- [ ] 5 layers (smoother torque)\n\nAnswer:\n\n## 2. Skin-depth elements in the hairpins\n\n- [ ] 2 per skin depth\n- [ ] 3 per skin depth\n\nAnswer:\n',
+    },
+    {
       id: 'done-calibrate-scope',
       path: 'tips/done-calibrate-scope.md',
       title: 'Calibrate the oscilloscope probes',

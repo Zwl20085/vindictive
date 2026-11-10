@@ -5,6 +5,8 @@
 import type { BoardState, Commands, Events, Settings, Tip, TipEdit, Weather } from '../types';
 import { agentInfo, withAgentState } from '../lib/agent';
 import { parseCapture } from '../lib/capture-hint';
+import { titleFromPrompt } from '../lib/prompt';
+import { isQuestion } from '../lib/question';
 import { MINUTE_MS, parseNaive, toNaive } from '../lib/time';
 import { urgencyOf } from '../lib/urgency';
 import { SAMPLE_SETTINGS, sampleTips } from './sample-tips';
@@ -135,12 +137,17 @@ function resolveRemind(remind: readonly string[], dueAt: string | undefined): st
   return out;
 }
 
-/** The mock's capture parser: `parseCapture` plus the resolved timestamps; throws without a title. */
+/**
+ * The mock's capture parser: `parseCapture` plus the resolved timestamps;
+ * throws without a title. For an agent tip the text is the prompt: the whole
+ * body, with the title derived from it (`render_capture` in commands.rs).
+ */
 export function parseCaptureText(text: string, now = new Date()): Omit<Tip, 'id' | 'path'> {
   const parsed = parseCapture(text, now);
   if (!parsed.title) throw new Error('capture text has no title');
+  const agent = parsed.kind === 'agent';
   return {
-    title: parsed.title,
+    title: agent ? titleFromPrompt(parsed.title) ?? parsed.title : parsed.title,
     kind: parsed.kind ?? 'task',
     priority: parsed.priority ?? 'normal',
     status: 'open',
@@ -148,7 +155,7 @@ export function parseCaptureText(text: string, now = new Date()): Omit<Tip, 'id'
     due: parsed.due ?? undefined,
     due_at: resolveDue(parsed.due ?? undefined),
     location: parsed.location ?? undefined,
-    body: '',
+    body: agent ? `${parsed.title}\n` : '',
     remind_at: [],
   };
 }
@@ -168,8 +175,14 @@ const COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const SIZES = new Set(['sm', 'md', 'wide']);
 
 /** The `TipEdit` fields as tip fields, checked the way `core/edit.rs` does (fewer checks). */
-function editFields(edit: TipEdit): Omit<Tip, 'id' | 'path' | 'status' | 'remind_at'> & { remind_at: string[] } {
-  const title = edit.title.trim();
+function editFields(edit: TipEdit, question = false): Omit<Tip, 'id' | 'path' | 'status' | 'remind_at'> & { remind_at: string[] } {
+  const typed = edit.title.trim();
+  // As in core/edit.rs: an agent task left without a title takes it from the
+  // prompt; a question tip is never one, so it always needs a title.
+  const agentTask = edit.kind === 'agent' && !question;
+  const derived = !typed && agentTask ? titleFromPrompt(edit.body) : undefined;
+  if (!typed && agentTask && !derived) throw new Error('an agent tip needs a prompt (or a title)');
+  const title = typed || derived;
   if (!title) throw new Error('a tip needs a title');
   const due = edit.due?.trim() || undefined;
   const dueAt = resolveDue(due);
@@ -203,7 +216,8 @@ function editFields(edit: TipEdit): Omit<Tip, 'id' | 'path' | 'status' | 'remind
   };
 }
 
-/** `base`, else `base-2`, `base-3`… whichever no tip uses yet (file names are ids). */
+/** `base`, else `base-2`, `base-3`… whichever no tip uses yet (file names are
+ *  ids; a question tip's id carries `questions/`, so it never takes a name). */
 function uniqueId(base: string, taken: readonly Tip[]): string {
   const ids = new Set(taken.map((t) => t.id));
   if (!ids.has(base)) return base;
@@ -259,7 +273,7 @@ function complete(tip: Tip, now: Date): Tip {
 /** The mock's version of `core/edit.rs`: same rules, fewer checks. */
 function applyEdit(tip: Tip, base: string | null, edit: TipEdit): Tip {
   if ((tip.sha ?? null) !== base) throw new Error(`${tip.path} changed on disk since it was loaded; reloaded, please retry`);
-  return { ...tip, ...editFields(edit) };
+  return { ...tip, ...editFields(edit, isQuestion(tip)) };
 }
 
 /**
@@ -326,6 +340,7 @@ const handlers: { [K in CommandName]: (args: Parameters<Commands[K]>[0]) => Retu
   open_agent_results: ({ id }) => {
     const tip = store.tips.find((t) => t.id === id);
     if (!tip) throw new Error(`tip ${id} not found`);
+    if (isQuestion(tip)) throw new Error('a question tip is not an agent task and has no results folder');
     const results = agentInfo(tip).results;
     if (!results) throw new Error('the agent has not recorded a results folder for this tip');
     agentResultsRel(results);

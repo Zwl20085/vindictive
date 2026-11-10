@@ -6,6 +6,8 @@
  */
 import type { Kind, Priority, Tip, TipEdit } from '../types';
 import { kindLabel, t, type StringKey } from '../lib/i18n';
+import { titleFromPrompt } from '../lib/prompt';
+import { isQuestion } from '../lib/question';
 import { parseNaive } from '../lib/time';
 import { el } from './dom';
 import { errorMessage } from './errors';
@@ -15,6 +17,9 @@ export const MAX_TITLE_CHARS = 200;
 export const MAX_LOCATION_CHARS = 200;
 export const MAX_BODY_CHARS = 100_000;
 const BODY_ROWS = 10;
+/** The prompt of an agent tip is the main thing in the form. */
+const PROMPT_ROWS = 14;
+const AGENT_HINT_ID = 'edit-agent-hint';
 /** A second Esc within this long discards unsaved changes. */
 export const DISCARD_CONFIRM_MS = 2000;
 /** A clock time inside a due string: `09:30`, `9:30`, `T23:59`, `09:30:00`. */
@@ -69,6 +74,16 @@ export function emptyDraft(): TipEdit {
     highlight: [],
     body: '',
   };
+}
+
+/**
+ * A draft from a quick-capture line, for the full form. For an agent tip
+ * the captured text is the prompt: it goes into the body and the title is
+ * left empty, to be derived from the prompt on save.
+ */
+export function draftFromCapture(draft: TipEdit): TipEdit {
+  if (draft.kind !== 'agent' || draft.body.trim()) return draft;
+  return { ...draft, title: '', body: draft.title };
 }
 
 /** A stand-in Tip for the create form, so a draft renders through the same fields as an edit. */
@@ -212,8 +227,8 @@ export function readEditForm(form: HTMLFormElement): TipEdit {
     const node = form.querySelector<HTMLElement>(`[name="${name}"]`);
     return node?.dataset.original !== undefined && node.dataset.original === raw(name);
   };
-  const title = raw('title').trim();
-  if (!title) throw new Error(t('titleRequired'));
+  const kind = oneOf('fieldKind', raw('kind'), KINDS);
+  const title = titleFor(raw('title').trim(), kind, isAgentLayout(form, kind), raw('body'));
   const date = raw('due_date').trim();
   const time = raw('due_time').trim();
   if (time && !date) throw new Error(t('timeNeedsDate'));
@@ -225,7 +240,7 @@ export function readEditForm(form: HTMLFormElement): TipEdit {
   const remind = untouched('remind') ? remindEntries(raw('remind')) : splitRemind(raw('remind'), !!date);
   return {
     title: limited('fieldTitle', title, MAX_TITLE_CHARS),
-    kind: oneOf('fieldKind', raw('kind'), KINDS),
+    kind,
     priority: oneOf('fieldPriority', raw('priority'), PRIORITIES),
     due: date ? (time ? `${date} ${time}` : date) : null,
     location: location ? limited('fieldLocation', location, MAX_LOCATION_CHARS) : null,
@@ -239,6 +254,38 @@ export function readEditForm(form: HTMLFormElement): TipEdit {
     highlight: untouched('highlight') ? splitPhrases(raw('highlight')) : readHighlights(raw('highlight')),
     body: limited('fieldBody', raw('body'), MAX_BODY_CHARS),
   };
+}
+
+/** The title as typed; an agent task left without one takes it from the prompt. */
+function titleFor(typed: string, kind: Kind, agentTask: boolean, body: string): string {
+  if (typed) return typed;
+  if (kind !== 'agent' || !agentTask) throw new Error(t('titleRequired'));
+  const derived = titleFromPrompt(body);
+  if (!derived) throw new Error(t('agentNeedsPrompt'));
+  return derived;
+}
+
+/**
+ * Marks a field an agent task has no use for (see applyKind). `stored`: the
+ * tip already has a value there, perhaps one the control cannot show (a due
+ * that does not parse), so the field is never folded away.
+ */
+function nonAgent<T extends HTMLElement>(node: T, stored: boolean): T {
+  node.classList.add('set-nonagent');
+  if (stored) node.dataset.stored = 'true';
+  return node;
+}
+
+const hasText = (value: string | undefined): boolean => !!value?.trim();
+const hasItems = (values: readonly string[] | undefined): boolean => (values ?? []).some((v) => v.trim() !== '');
+
+/**
+ * The form lays out kind `agent` as an agent task. A question tip
+ * (`questions/`) never is one, whatever its kind says: the runner only scans
+ * the top level, so it keeps the normal layout and needs a title.
+ */
+function isAgentLayout(form: HTMLFormElement, kind: string | undefined): boolean {
+  return kind === 'agent' && form.dataset.question !== 'true';
 }
 
 function field(label: StringKey, name: string, input: HTMLElement): HTMLElement {
@@ -303,13 +350,13 @@ function moreFields(tip: Tip): HTMLDetailsElement {
     el(
       'div',
       { className: 'set-more-body' },
-      field('fieldRemind', 'remind', textInput(remindText, { spellcheck: 'false', placeholder: '-1d -2h 2026-10-13 09:00', 'data-original': remindText })),
-      field('fieldRepeat', 'repeat', textInput(tip.repeat ?? '', { spellcheck: 'false', list: 'edit-repeat-options' })),
+      nonAgent(field('fieldRemind', 'remind', textInput(remindText, { spellcheck: 'false', placeholder: '-1d -2h 2026-10-13 09:00', 'data-original': remindText })), hasItems(tip.remind)),
+      nonAgent(field('fieldRepeat', 'repeat', textInput(tip.repeat ?? '', { spellcheck: 'false', list: 'edit-repeat-options' })), hasText(tip.repeat)),
       repeatOptions,
       el('div', { className: 'set-pair' }, colorField(tip.color ?? ''), field('fieldSize', 'size', size)),
       field('fieldHighlight', 'highlight', textInput(highlightText, { 'data-original': highlightText })),
-      field('fieldLinks', 'links', lines(tip.links)),
-      field('fieldImages', 'images', lines(tip.images)),
+      nonAgent(field('fieldLinks', 'links', lines(tip.links)), hasItems(tip.links)),
+      nonAgent(field('fieldImages', 'images', lines(tip.images)), hasItems(tip.images)),
     ),
   );
 }
@@ -318,6 +365,9 @@ function fields(tip: Tip): HTMLElement[] {
   const due = dueFields(tip);
   const body = el('textarea', { rows: String(BODY_ROWS), spellcheck: 'false' });
   body.value = tip.body;
+  // Shown for an agent tip only (applyKind).
+  const showAll = el('button', { type: 'button', className: 'link-button edit-show-all', 'aria-expanded': 'false', hidden: true, text: t('showAllFields') });
+  const hint = el('p', { className: 'set-hint edit-agent-hint', id: AGENT_HINT_ID, hidden: true, text: t('agentPromptHint') });
   return [
     field('fieldTitle', 'title', textInput(tip.title, { maxlength: String(MAX_TITLE_CHARS), required: 'required' })),
     el(
@@ -326,17 +376,68 @@ function fields(tip: Tip): HTMLElement[] {
       field('fieldKind', 'kind', select(tip.kind, KINDS, (k) => kindLabel(k))),
       field('fieldPriority', 'priority', select(tip.priority, PRIORITIES, (p) => t(`prio_${p}`))),
     ),
-    el(
-      'div',
-      { className: 'set-pair' },
-      field('fieldDueDate', 'due_date', textInput(due.date, { type: 'date' })),
-      field('fieldDueTime', 'due_time', textInput(due.time, { type: 'time' })),
+    showAll,
+    nonAgent(
+      el(
+        'div',
+        { className: 'set-pair' },
+        field('fieldDueDate', 'due_date', textInput(due.date, { type: 'date' })),
+        field('fieldDueTime', 'due_time', textInput(due.time, { type: 'time' })),
+      ),
+      hasText(tip.due) || hasText(tip.due_at),
     ),
-    field('fieldLocation', 'location', textInput(tip.location ?? '', { maxlength: String(MAX_LOCATION_CHARS) })),
-    field('fieldTags', 'tags', textInput((tip.tags ?? []).join(' '))),
+    nonAgent(field('fieldLocation', 'location', textInput(tip.location ?? '', { maxlength: String(MAX_LOCATION_CHARS) })), hasText(tip.location)),
+    nonAgent(field('fieldTags', 'tags', textInput((tip.tags ?? []).join(' '))), hasItems(tip.tags)),
     moreFields(tip),
-    field('fieldBody', 'body', body),
+    el('div', { className: 'edit-body-block' }, hint, field('fieldBody', 'body', body)),
   ];
+}
+
+/** The tip had a value here when the form opened, or a control now holds text. */
+function holdsValue(node: HTMLElement): boolean {
+  if (node.dataset.stored === 'true') return true;
+  return Array.from(node.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[name], textarea[name]')).some((c) => c.value.trim() !== '');
+}
+
+/**
+ * Lay the form out for its current kind. For an agent tip the prompt (the
+ * body) comes right after kind and priority with a hint, the title becomes
+ * optional, and the fields an agent task has no use for (due, location,
+ * tags, reminders, repeat, links, figures) are folded away unless they hold
+ * a value or "Show all fields" is on. Nothing is removed: switching the
+ * kind back shows every field with what was typed.
+ */
+function applyKind(form: HTMLFormElement, showAll: boolean): void {
+  const agent = isAgentLayout(form, form.querySelector<HTMLSelectElement>('[name="kind"]')?.value);
+  form.querySelectorAll<HTMLElement>('.set-nonagent').forEach((node) => {
+    node.hidden = agent && !showAll && !holdsValue(node);
+  });
+  const toggle = form.querySelector<HTMLButtonElement>('.edit-show-all');
+  if (toggle) {
+    toggle.hidden = !agent;
+    toggle.setAttribute('aria-expanded', String(showAll));
+    toggle.textContent = showAll ? t('hideUnusedFields') : t('showAllFields');
+  }
+  const hint = form.querySelector<HTMLElement>('.edit-agent-hint');
+  if (hint) hint.hidden = !agent;
+  const block = form.querySelector<HTMLElement>('.edit-body-block');
+  const body = form.querySelector<HTMLTextAreaElement>('[name="body"]');
+  const label = block?.querySelector('.set-label');
+  if (label) label.textContent = agent ? t('fieldPrompt') : t('fieldBody');
+  if (body) {
+    body.rows = agent ? PROMPT_ROWS : BODY_ROWS;
+    body.placeholder = agent ? t('agentPromptHint') : '';
+    if (agent) body.setAttribute('aria-describedby', AGENT_HINT_ID);
+    else body.removeAttribute('aria-describedby');
+  }
+  const title = form.querySelector<HTMLInputElement>('[name="title"]');
+  if (title) {
+    title.required = !agent;
+    title.placeholder = agent ? t('agentTitlePlaceholder') : '';
+  }
+  // The prompt first for an agent; the text last for every other kind.
+  const anchor = agent ? toggle : form.querySelector<HTMLElement>('.set-more');
+  if (block && anchor && anchor.nextElementSibling !== block) anchor.after(block);
 }
 
 /** What the form opened with, per form, for `isEditFormDirty`. */
@@ -377,6 +478,14 @@ export function renderEditForm(options: EditFormOptions): HTMLFormElement {
     status,
     el('div', { className: 'set-row set-actions' }, save, cancel),
   );
+  if (isQuestion(tip)) form.dataset.question = 'true';
+  let showAll = false;
+  applyKind(form, showAll);
+  form.querySelector<HTMLSelectElement>('[name="kind"]')?.addEventListener('change', () => applyKind(form, showAll));
+  form.querySelector<HTMLButtonElement>('.edit-show-all')?.addEventListener('click', () => {
+    showAll = !showAll;
+    applyKind(form, showAll);
+  });
   const report = (error: unknown): void => {
     status.textContent = errorMessage(error);
     status.dataset.state = 'error';

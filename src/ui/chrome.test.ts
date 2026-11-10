@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 function actions(): ChromeActions {
-  return { onSync: vi.fn(), onOpenFolder: vi.fn(), onSettings: vi.fn(), onToggleDone: vi.fn(), onDock: vi.fn(), onQuit: vi.fn() };
+  return { onSync: vi.fn(), onOpenFolder: vi.fn(), onSettings: vi.fn(), onToggleDone: vi.fn(), onToggleQuestions: vi.fn(), onDock: vi.fn(), onQuit: vi.fn() };
 }
 
 describe('chrome strip', () => {
@@ -69,5 +69,20 @@ describe('chrome strip', () => {
     document.body.append(strip);
     strip.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 5 }));
     expect(document.querySelector('.menu')).not.toBeNull();
+  });
+
+  it('the menu has a "Questions only" filter that shows its state', () => {
+    const a = actions();
+    for (const on of [false, true]) {
+      closeMenu();
+      const strip = renderChrome({ sync: 'idle', actions: a, questionsOnly: on });
+      document.body.append(strip);
+      strip.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 5 }));
+      const item = Array.from(document.querySelectorAll<HTMLElement>('.menu [role="menuitem"]')).find((i) => i.textContent?.includes('Questions only'));
+      expect(item, 'menu item').toBeDefined();
+      expect(item?.querySelector('.menu-check')?.textContent).toBe(on ? '✓' : '');
+      item?.click();
+    }
+    expect(a.onToggleQuestions).toHaveBeenCalledTimes(2);
   });
 });

@@ -241,6 +241,27 @@ describe('App create form', () => {
     expect(form?.querySelector('button[type="submit"]')?.textContent).toBe('Create');
   });
 
+  it('Ctrl+Enter on an >agent line puts the text in the prompt and leaves the title to be derived', async () => {
+    await start();
+    const input = openBar();
+    input.value = 'Survey hairpin AC loss papers #lit >agent';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    const form = createForm();
+    const value = (name: string): string => form?.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`[name="${name}"]`)?.value ?? '';
+    expect(value('kind')).toBe('agent');
+    expect(value('title')).toBe('');
+    expect(value('body')).toBe('Survey hairpin AC loss papers');
+    expect(value('tags')).toBe('lit');
+    let sent: unknown;
+    backend.handlers.create_tip_full = async (args) => {
+      sent = args;
+      return board([tip('a'), tip('b'), tip('new', { title: 'Survey hairpin AC loss papers', kind: 'agent' })]);
+    };
+    form?.requestSubmit();
+    await vi.waitFor(() => expect(sent).toMatchObject({ edit: { title: 'Survey hairpin AC loss papers', body: 'Survey hairpin AC loss papers', kind: 'agent' } }));
+    await vi.waitFor(() => expect(document.activeElement).toBe(tile('new')));
+  });
+
   it('mounts the form once: the tick and board updates keep what is typed', async () => {
     await start();
     openBar().value = 'Draft';
@@ -459,6 +480,59 @@ describe('App chrome strip', () => {
     expect(document.activeElement).toBe(dot);
     backend.emit?.({ ...board(), settings: { ...board().settings, language: 'zh' } });
     expect(root.querySelector('.chrome')).not.toBe(strip);
+  });
+});
+
+describe('App questions', () => {
+  const question = tip('questions/q', { path: 'questions/q.md', title: 'Pick a mesh' });
+  const menuItem = (label: string): HTMLElement | undefined =>
+    Array.from(document.querySelectorAll<HTMLElement>('.menu [role="menuitem"]')).find((i) => i.textContent?.includes(label));
+  const openStripMenu = (): void => {
+    root.querySelector('.chrome')?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 5 }));
+  };
+  const shown = (): string[] => Array.from(front().querySelectorAll<HTMLElement>('.tile[data-id]')).map((t) => t.dataset.id ?? '');
+
+  it('the strip menu filters the board to question tips and back', async () => {
+    await start(board([tip('a'), question, tip('b')]));
+    expect(shown()).toEqual(['a', 'questions/q', 'b']);
+    openStripMenu();
+    menuItem('Questions only')?.click();
+    expect(shown()).toEqual(['questions/q']);
+    expect(front().querySelector('.tile-add')).toBeNull();
+    // A board update keeps the filter.
+    backend.emit?.(board([tip('a'), question, tip('c')]));
+    expect(shown()).toEqual(['questions/q']);
+    openStripMenu();
+    expect(menuItem('Questions only')?.querySelector('.menu-check')?.textContent).toBe('✓');
+    menuItem('Questions only')?.click();
+    expect(shown()).toEqual(['a', 'questions/q', 'c']);
+  });
+
+  it('the add shortcut clears the filter, so the new tip is not hidden', async () => {
+    await start(board([tip('a'), question]));
+    openStripMenu();
+    menuItem('Questions only')?.click();
+    expect(shown()).toEqual(['questions/q']);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true }));
+    expect(front().querySelector('.addbar-input')).not.toBeNull();
+    expect(shown()).toEqual(['a', 'questions/q']);
+    openStripMenu();
+    expect(menuItem('Questions only')?.querySelector('.menu-check')?.textContent).toBe('');
+  });
+
+  it('a question opens, and Done goes to the backend under its own id', async () => {
+    await start(board([tip('q'), question]));
+    const calls: unknown[] = [];
+    backend.handlers.mark_done = async (args) => {
+      calls.push(args);
+      return board([tip('q')]);
+    };
+    const detail = await openDetail('questions/q');
+    expect(detail.querySelector('.detail-kind')?.textContent).toContain('Question');
+    Array.from(detail.querySelectorAll<HTMLButtonElement>('.detail-actions button'))
+      .find((b) => b.textContent === 'Done')
+      ?.click();
+    await vi.waitFor(() => expect(calls).toEqual([{ id: 'questions/q' }]));
   });
 });
 

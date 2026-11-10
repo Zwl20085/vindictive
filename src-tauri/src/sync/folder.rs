@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
+use crate::core::question::QUESTIONS_DIR;
+
 /// Sub-folder used when the user has not picked one.
 pub const DEFAULT_FOLDER_NAME: &str = "Vindictive";
 /// Attempts at replacing a file another program (OneDrive, antivirus, an
@@ -75,6 +77,15 @@ impl FileEntry {
     }
 }
 
+/// The result of one folder scan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listing {
+    pub files: Vec<FileEntry>,
+    /// Why `questions/` could not be read; its tips are then not in `files`
+    /// and must not be taken for deleted.
+    pub questions_error: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FolderStore {
     root: PathBuf,
@@ -101,31 +112,61 @@ impl FolderStore {
         &self.root
     }
 
-    /// Every `*.md` file directly in the folder, skipping hidden files and
-    /// the temporary files editors and OneDrive leave behind.
+    /// Every `*.md` file directly in the folder and directly in its
+    /// `questions/` subfolder (as `questions/<name>`), skipping hidden files
+    /// and the temporary files editors and OneDrive leave behind. A
+    /// `questions/` that cannot be read is left out; `scan` says why.
     pub fn list(&self) -> Result<Vec<FileEntry>> {
-        let entries =
-            std::fs::read_dir(&self.root).map_err(|e| io("cannot list", &self.root, e))?;
-        let mut files: Vec<FileEntry> = entries
-            .filter_map(|entry| entry.ok())
-            .filter_map(|entry| {
-                let name = entry.file_name().to_str()?.to_string();
-                if is_tmp_name(&name) {
-                    remove_if_stale(&entry.path());
-                    return None;
-                }
-                if !is_tip_name(&name) {
-                    return None;
-                }
-                let meta = entry.metadata().ok().filter(|m| m.is_file())?;
-                Some(FileEntry {
-                    stamp: stamp_of(&meta),
-                    path: name,
-                })
-            })
-            .collect();
+        self.scan().map(|listing| listing.files)
+    }
+
+    /// Like `list`, and also why `questions/` could not be read, if it could
+    /// not. Only the main folder can fail the whole scan.
+    pub fn scan(&self) -> Result<Listing> {
+        let mut files = list_dir(&self.root, "", &self.canonical_root)?;
+        let (questions, questions_error) = questions_outcome(self.list_questions());
+        files.extend(questions);
         files.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(files)
+        Ok(Listing {
+            files,
+            questions_error,
+        })
+    }
+
+    /// The tips in `questions/`. A missing folder, or a `questions` that is a
+    /// file, a link or a junction, holds none: links are never followed. The
+    /// folder's real location is checked again after the type check, and
+    /// the stale-file sweep checks it again per file. That narrows a swap
+    /// for a junction to the moment between a file's check and its
+    /// deletion; it does not close it (that would need handle-relative file
+    /// calls). Listed files are read through `resolve`, which refuses
+    /// anything outside the tips folder.
+    fn list_questions(&self) -> Result<Vec<FileEntry>> {
+        let dir = self.root.join(QUESTIONS_DIR);
+        match std::fs::symlink_metadata(&dir) {
+            Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {}
+            Ok(_) => return Ok(Vec::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(io("cannot inspect", &dir, e)),
+        }
+        let real = match dir.canonicalize() {
+            Ok(real) => real,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(io("cannot inspect", &dir, e)),
+        };
+        if !self.is_questions_dir(&real) {
+            return Ok(Vec::new());
+        }
+        list_dir(&dir, &format!("{QUESTIONS_DIR}/"), &real)
+    }
+
+    /// `real` is the tips folder's own `questions` subfolder (any case).
+    fn is_questions_dir(&self, real: &Path) -> bool {
+        real.parent() == Some(self.canonical_root.as_path())
+            && real
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.eq_ignore_ascii_case(QUESTIONS_DIR))
     }
 
     /// File text and its stamp. The stamp is taken before and after the
@@ -283,6 +324,46 @@ fn plain_path(path: &Path) -> PathBuf {
     }
 }
 
+/// The questions listing as the scan uses it: a folder gone by now is
+/// empty; any other error leaves `questions/` out and is reported, so the
+/// main folder still refreshes.
+fn questions_outcome(result: Result<Vec<FileEntry>>) -> (Vec<FileEntry>, Option<String>) {
+    match result {
+        Ok(files) => (files, None),
+        Err(FolderError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+            (Vec::new(), None)
+        }
+        Err(e) => (Vec::new(), Some(e.to_string())),
+    }
+}
+
+/// Every tip file directly in `dir`, its path prefixed with `prefix`. Stale
+/// temp files are removed on the way; links are skipped (`DirEntry::metadata`
+/// does not follow them, so they are not files). `real_dir` is `dir` with
+/// links resolved, as checked by the caller; a stale temp file is only
+/// removed after its own folder resolves to it (see `remove_if_stale`).
+fn list_dir(dir: &Path, prefix: &str, real_dir: &Path) -> Result<Vec<FileEntry>> {
+    let entries = std::fs::read_dir(dir).map_err(|e| io("cannot list", dir, e))?;
+    Ok(entries
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_string();
+            if is_tmp_name(&name) {
+                remove_if_stale(&entry.path(), real_dir);
+                return None;
+            }
+            if !is_tip_name(&name) {
+                return None;
+            }
+            let meta = entry.metadata().ok().filter(|m| m.is_file())?;
+            Some(FileEntry {
+                stamp: stamp_of(&meta),
+                path: format!("{prefix}{name}"),
+            })
+        })
+        .collect())
+}
+
 /// Move `tmp` over `path`, retrying while another program holds a handle.
 fn replace(rel: &str, tmp: &Path, path: &Path) -> Result<()> {
     retry_in_use(rel, || std::fs::rename(tmp, path))
@@ -317,8 +398,20 @@ fn is_tmp_name(name: &str) -> bool {
     name.starts_with('.') && name.ends_with(".tmp")
 }
 
-fn remove_if_stale(path: &Path) {
-    let old = std::fs::metadata(path)
+/// Remove the temp file `path` if it is old and its folder, links
+/// resolved, is `real_dir`. The check runs just before the delete, so a
+/// folder swapped for a link before it is not swept; a swap in the few
+/// system calls between the check and the delete is still possible.
+/// Only old `.*.tmp` names are ever deleted.
+fn remove_if_stale(path: &Path, real_dir: &Path) {
+    let inside = path
+        .parent()
+        .and_then(|p| p.canonicalize().ok())
+        .is_some_and(|p| p == real_dir);
+    if !inside {
+        return;
+    }
+    let old = std::fs::symlink_metadata(path)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| SystemTime::now().duration_since(t).ok())
@@ -483,6 +576,228 @@ mod tests {
         std::fs::create_dir(dir.path().join("figures.md")).unwrap();
         let names: Vec<String> = s.list().unwrap().into_iter().map(|f| f.path).collect();
         assert_eq!(names, vec!["a.MD", "b.md"]);
+    }
+
+    #[test]
+    fn lists_markdown_files_directly_in_questions_too() {
+        let (s, dir) = store();
+        let questions = dir.path().join("questions");
+        std::fs::create_dir_all(questions.join("deeper")).unwrap();
+        std::fs::create_dir_all(dir.path().join("agent")).unwrap();
+        std::fs::create_dir_all(dir.path().join("figures")).unwrap();
+        std::fs::write(dir.path().join("a.md"), "x").unwrap();
+        for name in ["q.md", "a.md", ".hidden.md", "~$lock.md", "x.txt"] {
+            std::fs::write(questions.join(name), "x").unwrap();
+        }
+        std::fs::write(questions.join("deeper").join("deep.md"), "x").unwrap();
+        std::fs::create_dir(questions.join("folder.md")).unwrap();
+        std::fs::write(dir.path().join("agent").join("result.md"), "x").unwrap();
+        std::fs::write(dir.path().join("figures").join("notes.md"), "x").unwrap();
+        let names: Vec<String> = s.list().unwrap().into_iter().map(|f| f.path).collect();
+        assert_eq!(names, vec!["a.md", "questions/a.md", "questions/q.md"]);
+    }
+
+    #[test]
+    fn a_missing_or_odd_questions_folder_is_not_an_error() {
+        let (s, dir) = store();
+        std::fs::write(dir.path().join("a.md"), "x").unwrap();
+        assert_eq!(s.list().unwrap().len(), 1);
+        // A file named `questions` is not the folder.
+        std::fs::write(dir.path().join("questions"), "x").unwrap();
+        assert_eq!(s.list().unwrap().len(), 1);
+        assert!(!dir.path().join("questions").is_dir(), "never created");
+    }
+
+    #[test]
+    fn question_files_read_write_and_delete_in_place() {
+        let (s, dir) = store();
+        std::fs::create_dir(dir.path().join("questions")).unwrap();
+        std::fs::write(dir.path().join("a.md"), "main").unwrap();
+        let stamp = s.write_text("questions/a.md", "question", None).unwrap();
+        let (text, read) = s.read_text("questions/a.md").unwrap();
+        assert_eq!((text.as_str(), read.as_str()), ("question", stamp.as_str()));
+        let next = s
+            .write_text("questions/a.md", "answered", Some(&stamp))
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("questions").join("a.md")).unwrap(),
+            "answered"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.md")).unwrap(),
+            "main"
+        );
+        // No temp file is left in either folder.
+        let names: Vec<String> = s.list().unwrap().into_iter().map(|f| f.path).collect();
+        assert_eq!(names, vec!["a.md", "questions/a.md"]);
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("questions"))
+                .unwrap()
+                .count(),
+            1
+        );
+        s.delete("questions/a.md", &next).unwrap();
+        assert!(dir.path().join("a.md").exists());
+        assert_eq!(s.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn stale_temp_files_in_questions_are_swept() {
+        let (s, dir) = store();
+        let questions = dir.path().join("questions");
+        std::fs::create_dir(&questions).unwrap();
+        let stale = questions.join(".q.md.1-2.tmp");
+        let file = std::fs::File::create(&stale).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+        drop(file);
+        assert!(s.list().unwrap().is_empty());
+        assert!(!stale.exists());
+    }
+
+    #[test]
+    fn question_paths_cannot_escape() {
+        let (s, _dir) = store();
+        for bad in [
+            "questions/../../x.md",
+            "questions/../..",
+            "questions/a.md:evil",
+        ] {
+            assert!(s.resolve(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// A link test that could not make its link proves nothing: say so in
+    /// the output, and fail outright on CI, where a skip would go unseen.
+    #[cfg(windows)]
+    fn skip_without_link(test: &str) {
+        let note = format!("SKIPPED {test}: could not create the link");
+        assert!(std::env::var_os("CI").is_none(), "{note}");
+        eprintln!("{note}");
+    }
+
+    /// A junction `link` to `target`, made with `mklink /J` (no privilege
+    /// needed). False when it could not be made.
+    #[cfg(windows)]
+    fn junction(link: &Path, target: &Path) -> bool {
+        std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(link)
+            .arg(target)
+            .output()
+            .is_ok_and(|o| o.status.success())
+            && link.join(".").exists()
+    }
+
+    /// An outside folder holding a tip and a stale temp file.
+    fn outside_with_stale_tmp() -> (tempfile::TempDir, PathBuf) {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "x").unwrap();
+        let stale = outside.path().join(".secret.md.1-1.tmp");
+        let file = std::fs::File::create(&stale).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+        drop(file);
+        (outside, stale)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_linked_questions_folder_is_not_followed() {
+        let (s, dir) = store();
+        let (outside, stale) = outside_with_stale_tmp();
+        // Creating symlinks needs Developer Mode or admin.
+        if std::os::windows::fs::symlink_dir(outside.path(), dir.path().join("questions")).is_err()
+        {
+            return skip_without_link("a_linked_questions_folder_is_not_followed");
+        }
+        assert!(s.list().unwrap().is_empty());
+        assert!(stale.exists(), "nothing outside the folder is swept");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_questions_folder_is_not_followed() {
+        let (s, dir) = store();
+        let (outside, stale) = outside_with_stale_tmp();
+        if !junction(&dir.path().join("questions"), outside.path()) {
+            return skip_without_link("a_junction_questions_folder_is_not_followed");
+        }
+        assert!(dir.path().join("questions").join("secret.md").exists());
+        assert!(s.list().unwrap().is_empty());
+        assert!(stale.exists(), "nothing outside the folder is swept");
+    }
+
+    /// `questions` swapped for a junction after the folder check: the sweep
+    /// re-checks each file's real folder before deleting. (A swap between
+    /// that re-check and the delete is not covered; see `remove_if_stale`.)
+    #[test]
+    fn the_stale_sweep_rechecks_each_files_folder_before_deleting() {
+        let (_s, dir) = store();
+        let questions = dir.path().join("questions");
+        std::fs::create_dir(&questions).unwrap();
+        let checked = questions.canonicalize().unwrap();
+        let (_outside, stale) = outside_with_stale_tmp();
+        remove_if_stale(&stale, &checked);
+        assert!(stale.exists(), "outside the checked folder: kept");
+        let inside = questions.join(".q.md.1-1.tmp");
+        let file = std::fs::File::create(&inside).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+        drop(file);
+        remove_if_stale(&inside, &checked);
+        assert!(!inside.exists(), "inside the checked folder: swept");
+    }
+
+    #[test]
+    fn a_questions_folder_that_vanishes_mid_scan_is_empty() {
+        let (s, dir) = store();
+        std::fs::write(dir.path().join("a.md"), "x").unwrap();
+        // Gone between the check and the listing: the listing reports
+        // NotFound, which counts as an empty folder.
+        let gone = io(
+            "cannot list",
+            &dir.path().join("questions"),
+            std::io::Error::from(std::io::ErrorKind::NotFound),
+        );
+        assert_eq!(questions_outcome(Err(gone)), (Vec::new(), None));
+        assert!(s.scan().unwrap().questions_error.is_none());
+    }
+
+    #[test]
+    fn an_unreadable_questions_folder_does_not_block_the_main_folder() {
+        let denied = io(
+            "cannot list",
+            Path::new("questions"),
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        );
+        let (files, error) = questions_outcome(Err(denied));
+        assert!(files.is_empty());
+        let error = error.unwrap();
+        assert!(error.contains("questions"), "{error}");
+        let ok = entries(&["questions/q.md"]);
+        assert_eq!(questions_outcome(Ok(ok.clone())), (ok, None));
+    }
+
+    #[test]
+    fn conflict_copies_in_questions_pair_with_their_own_folder() {
+        let listing = entries(&[
+            "a.md",
+            "questions/a-DESKTOP-AB12CD3.md",
+            "questions/q.md",
+            "questions/q-LAPTOP-9X.md",
+            "questions/r (1).md",
+            "questions/r.md",
+        ]);
+        assert_eq!(
+            conflict_copies(&listing),
+            vec![
+                ("questions/q-LAPTOP-9X.md", "questions/q.md"),
+                ("questions/r (1).md", "questions/r.md"),
+            ]
+        );
     }
 
     #[test]

@@ -10,6 +10,8 @@ export interface ChromeActions {
   onOpenFolder: () => void;
   onSettings: () => void;
   onToggleDone: () => void;
+  /** Show only question tips, or everything again. */
+  onToggleQuestions: () => void;
   onDock: (dock: Dock) => void;
   onQuit: () => void;
 }
@@ -18,6 +20,8 @@ export interface ChromeOptions {
   state?: BoardState;
   sync: SyncStatus;
   actions: ChromeActions;
+  /** The board shows only question tips. */
+  questionsOnly?: boolean;
 }
 
 /** Brand mark on the strip; deliberately not translated. */
@@ -31,7 +35,7 @@ function syncTitle(state: BoardState | undefined, sync: SyncStatus): string {
 }
 
 function buildMenu(options: ChromeOptions, x: number, y: number, returnFocus?: HTMLElement): void {
-  const { state, actions } = options;
+  const { state, actions, questionsOnly = false } = options;
   const dock = state?.settings.dock;
   showMenu(
     x,
@@ -41,6 +45,7 @@ function buildMenu(options: ChromeOptions, x: number, y: number, returnFocus?: H
       { label: t('openFolder'), onSelect: actions.onOpenFolder },
       { label: t('menuSettings'), onSelect: actions.onSettings },
       { label: t('menuShowDone'), checked: state?.settings.show_done, onSelect: actions.onToggleDone },
+      { label: t('menuQuestions'), checked: questionsOnly, onSelect: actions.onToggleQuestions },
       { label: t('menuDockLeft'), checked: dock === 'left', onSelect: () => actions.onDock('left') },
       { label: t('menuDockRight'), checked: dock === 'right', onSelect: () => actions.onDock('right') },
       { label: t('menuFree'), checked: dock === 'free', onSelect: () => actions.onDock('free') },
